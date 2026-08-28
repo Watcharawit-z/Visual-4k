@@ -126,16 +126,23 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $vsix = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Vsix" `
-                      -Filter "*.vsix" -Recurse -ErrorAction SilentlyContinue |
-                  Sort-Object FullName -Descending
-          if (-not $vsix) {
+          $all = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Vsix" `
+                     -Filter "*.vsix" -Recurse -ErrorAction SilentlyContinue
+          if (-not $all) {
             Write-Host "No WDK VSIX under Windows Kits\10\Vsix. Present:"
             Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Depth 1 |
                 Select-Object FullName
             throw "WDK VSIX not found"
           }
-          $vsix | ForEach-Object { Write-Host "found: $($_.FullName)" }
+          $all | ForEach-Object { Write-Host "found: $($_.FullName)" }
+
+          # The kit ships one VSIX per host architecture, and sorting the list
+          # by name puts arm64 first -- installing that on an x64 runner is
+          # what produced VSIXInstaller error 2001.
+          $vsix = $all | Where-Object { $_.FullName -match '\\amd64\\' } |
+                  Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $vsix) { throw "no amd64 WDK VSIX among the ones found above" }
+          Write-Host "installing: $($vsix.FullName)"
 
           # Locate VS through vswhere rather than a hardcoded year: the hosted
           # images change edition and version without notice, and a glob that
@@ -150,7 +157,7 @@ jobs:
           Write-Host "VS: $vsPath"
 
           $p = Start-Process -FilePath $installer `
-                             -ArgumentList "/quiet","/admin",$vsix[0].FullName `
+                             -ArgumentList "/quiet","/admin",$vsix.FullName `
                              -Wait -PassThru
           Write-Host "VSIXInstaller exit code: $($p.ExitCode)"
           # 1001 means "already installed", which is a success for our purposes.
