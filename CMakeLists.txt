@@ -54,4 +54,5 @@ endif()
 
 if(WIN32)
     add_subdirectory(host/visual4k-host)
+    add_subdirectory(installer/visual4k-setup)
 endif()

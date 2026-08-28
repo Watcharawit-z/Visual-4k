@@ -101,11 +101,26 @@ jobs:
       - name: Stage the package
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $out = "package/visual4k-host"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item build/host/visual4k-host/Release/visual4k-host.exe $out
+          Copy-Item build/installer/visual4k-setup/Release/Visual4k-Setup.exe $out
           Copy-Item -Recurse shaders "$out/shaders"
           Copy-Item build/Release/edid_selftest.exe $out -ErrorAction SilentlyContinue
+
+          # The setup program is the only thing most people will ever run, and
+          # a manifest that failed to embed produces an exe that starts without
+          # elevation and fails at its first step -- silently, as far as the
+          # build is concerned. So the embedded manifest is checked, not
+          # assumed.
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path "$out\Visual4k-Setup.exe"))
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          if ($text -notmatch 'requireAdministrator') {
+              throw "Visual4k-Setup.exe has no elevation manifest embedded"
+          }
+          Write-Host "elevation manifest present"
+
           Get-ChildItem -Recurse $out | Select-Object FullName
 
       - uses: actions/upload-artifact@v4
@@ -477,6 +492,7 @@ jobs:
           # The compositor renders black without these, so a zip missing them
           # would be worse than no zip at all.
           if (-not (Test-Path "$root/visual4k-host.exe")) { throw "compositor missing" }
+          if (-not (Test-Path "$root/Visual4k-Setup.exe")) { throw "setup program missing" }
           if (-not (Test-Path "$root/shaders")) { throw "shaders missing" }
           if (-not (Get-ChildItem "$root/driver" -Filter *.dll)) { throw "driver DLL missing" }
 

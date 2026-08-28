@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="Visual4k.Setup" version="1.0.0.0"
+                    processorArchitecture="amd64"/>
+  <description>Visual-4k setup</description>
+
+  <!-- Everything this program does needs administrator rights: writing to the
+       machine certificate stores, changing a boot setting, and creating a
+       device. Asking for them in the manifest means a double-click raises the
+       UAC prompt itself, rather than failing halfway through with access
+       denied. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <!-- Without declaring the OS versions it supports, Windows reports itself as
+       version 6.2 to this process for compatibility. Nothing here reads the
+       version through those APIs, but the declaration also governs which
+       behaviours the process opts into, and a driver installer should see the
+       system as it is. -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/><!-- 10 / 11 -->
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/><!-- 8.1 -->
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/><!-- 8 -->
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/><!-- 7 -->
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
