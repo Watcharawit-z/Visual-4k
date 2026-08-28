@@ -1,0 +1,183 @@
+# Builds Visual-4k on real Windows runners and publishes downloadable binaries.
+#
+# This exists because the project was written in a Linux container with no
+# Windows SDK and no WDK: until this workflow goes green, nothing here has ever
+# been through a compiler. CI is the first real build, and the artifacts it
+# produces are what users download instead of installing a toolchain.
+
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Everything that does not need Windows, run first so a numerics regression
+  # fails in 30 seconds instead of after two Windows builds.
+  reference:
+    name: reference tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install numpy pillow pytest
+
+      - name: Run the reference test suite
+        run: python -m pytest reference/tests -q
+
+      - name: Build and run the portable self-tests
+        run: |
+          cmake -B build -S .
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+      - name: Type-check the Windows host sources against the stubs
+        run: ./tools/check-host-compiles.sh
+
+  compositor:
+    name: compositor (visual4k-host)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -S . -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run the portable self-tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Stage the package
+        shell: pwsh
+        run: |
+          $out = "package/visual4k-host"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item build/host/visual4k-host/Release/visual4k-host.exe $out
+          Copy-Item -Recurse shaders "$out/shaders"
+          Copy-Item build/Release/edid_selftest.exe $out -ErrorAction SilentlyContinue
+          Get-ChildItem -Recurse $out | Select-Object FullName
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: visual4k-host
+          path: package/visual4k-host
+          if-no-files-found: error
+
+  driver:
+    name: driver (Visual4kDisplay)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      # The WDK is not on the hosted images. Installing it has two parts that
+      # are easy to confuse: the kit itself provides the headers and libraries,
+      # and a separate VSIX provides the MSBuild platform toolset the project
+      # file asks for. Without the VSIX the build fails with an unhelpful
+      # "WindowsUserModeDriver10.0 not found".
+      - name: Install the Windows Driver Kit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "Downloading WDK installer..."
+          $installer = "$env:RUNNER_TEMP\wdksetup.exe"
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2286137" `
+                            -OutFile $installer -UseBasicParsing
+          Write-Host "Running WDK installer (quiet)..."
+          $p = Start-Process -FilePath $installer `
+                             -ArgumentList "/quiet","/norestart","/features","+" `
+                             -Wait -PassThru
+          Write-Host "WDK installer exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
+            throw "WDK install failed with $($p.ExitCode)"
+          }
+
+      - name: Install the WDK Visual Studio extension
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          $vsix = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Vsix" `
+                      -Filter "*.vsix" -Recurse -ErrorAction SilentlyContinue |
+                  Sort-Object FullName -Descending
+          if (-not $vsix) {
+            Write-Host "::warning::No WDK VSIX found; listing what is present"
+            Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Depth 1 |
+                Select-Object FullName
+            exit 1
+          }
+          foreach ($v in $vsix) { Write-Host "found: $($v.FullName)" }
+
+          $installerPath = Get-ChildItem `
+              "C:\Program Files*\Microsoft Visual Studio\2022\*\Common7\IDE\VSIXInstaller.exe" |
+              Select-Object -First 1
+          Write-Host "using $($installerPath.FullName)"
+          $p = Start-Process -FilePath $installerPath.FullName `
+                             -ArgumentList "/quiet","/admin",$vsix[0].FullName `
+                             -Wait -PassThru
+          Write-Host "VSIXInstaller exit code: $($p.ExitCode)"
+
+      - name: Build the driver
+        shell: pwsh
+        run: |
+          msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
+                  /p:Configuration=Release /p:Platform=x64 `
+                  /v:normal /p:SignMode=Off
+
+      - name: Stage the package
+        shell: pwsh
+        run: |
+          $out = "package/Visual4kDisplay"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Get-ChildItem -Recurse driver/Visual4kDisplay/x64 |
+              Where-Object { $_.Extension -in ".dll",".inf",".pdb",".cat" } |
+              ForEach-Object { Copy-Item $_.FullName $out }
+          Get-ChildItem $out | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Visual4kDisplay
+          path: package/Visual4kDisplay
+          if-no-files-found: error
+
+  package:
+    name: release package
+    runs-on: windows-latest
+    needs: [reference, compositor, driver]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+
+      - name: Assemble the release zip
+        shell: pwsh
+        run: |
+          $root = "Visual-4k"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Copy-Item -Recurse staging/visual4k-host/* $root
+          New-Item -ItemType Directory -Force -Path "$root/driver" | Out-Null
+          Copy-Item -Recurse staging/Visual4kDisplay/* "$root/driver"
+          Copy-Item tools/install-driver.ps1, tools/uninstall-driver.ps1 $root
+          Copy-Item docs/GETTING-STARTED.md, README.md, LICENSE $root
+          Compress-Archive -Path $root -DestinationPath "Visual-4k-$($env:GITHUB_REF_NAME).zip"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: Visual-4k-*.zip
+          generate_release_notes: true
