@@ -128,8 +128,12 @@
       <AdditionalLibraryDirectories>
         $(Visual4kWdfLib);$(Visual4kIddCxLib);%(AdditionalLibraryDirectories)
       </AdditionalLibraryDirectories>
+      <!-- ntdll.lib is not optional: WdfDriverStubUm.lib calls DbgPrintEx,
+           which ntdll exports, and the WDK's own link settings would have
+           supplied it. Stating the libraries ourselves means stating that one
+           too. -->
       <AdditionalDependencies>
-        WdfDriverStubUm.lib;$(Visual4kIddCxLibFile);d3d11.lib;dxgi.lib;avrt.lib;%(AdditionalDependencies)
+        WdfDriverStubUm.lib;ntdll.lib;$(Visual4kIddCxLibFile);d3d11.lib;dxgi.lib;avrt.lib;%(AdditionalDependencies)
       </AdditionalDependencies>
     </Link>
     <Inf>
