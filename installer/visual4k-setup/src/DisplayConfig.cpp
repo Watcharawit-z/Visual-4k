@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstring>
 #include <cwchar>
 
@@ -58,13 +59,65 @@ std::vector<DisplayInfo> EnumerateDisplays()
     return displays;
 }
 
-bool FindVirtualDisplay(DisplayInfo* out)
+std::vector<std::wstring> AttachedDisplayNames()
 {
+    std::vector<std::wstring> names;
     for (const auto& display : EnumerateDisplays()) {
+        if (display.attached)
+            names.push_back(display.deviceName);
+    }
+    return names;
+}
+
+namespace {
+
+bool HasMarker(const std::wstring& text)
+{
+    return text.compare(0, wcslen(kVirtualDisplayMarker),
+                        kVirtualDisplayMarker) == 0;
+}
+
+// The monitor attached to an adapter, whose description Windows takes from the
+// EDID. The driver puts "Visual-4k" in the EDID's monitor-name descriptor, so
+// this matches even if the adapter is described some other way.
+bool MonitorHasMarker(const std::wstring& adapterName)
+{
+    DISPLAY_DEVICEW monitor = {};
+    monitor.cb = sizeof(monitor);
+    for (DWORD i = 0; EnumDisplayDevicesW(adapterName.c_str(), i, &monitor, 0);
+         ++i) {
+        if (HasMarker(monitor.DeviceString))
+            return true;
+        monitor = {};
+        monitor.cb = sizeof(monitor);
+    }
+    return false;
+}
+
+}  // namespace
+
+bool FindVirtualDisplay(DisplayInfo* out,
+                        const std::vector<std::wstring>& knownBefore)
+{
+    const std::vector<DisplayInfo> displays = EnumerateDisplays();
+
+    for (const auto& display : displays) {
+        if (display.attached &&
+            (HasMarker(display.description) ||
+             MonitorHasMarker(display.deviceName))) {
+            *out = display;
+            return true;
+        }
+    }
+
+    if (knownBefore.empty())
+        return false;
+
+    for (const auto& display : displays) {
         if (!display.attached)
             continue;
-        if (display.description.compare(0, wcslen(kVirtualDisplayMarker),
-                                        kVirtualDisplayMarker) == 0) {
+        if (std::find(knownBefore.begin(), knownBefore.end(),
+                      display.deviceName) == knownBefore.end()) {
             *out = display;
             return true;
         }

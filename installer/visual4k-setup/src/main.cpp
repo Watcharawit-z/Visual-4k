@@ -149,14 +149,60 @@ unsigned long WindowsBuild()
 }
 
 // Waits for the virtual display to be enumerated after the driver binds.
-bool WaitForVirtualDisplay(DisplayInfo* out, int seconds)
+bool WaitForVirtualDisplay(DisplayInfo* out, int seconds,
+                           const std::vector<std::wstring>& knownBefore)
 {
     for (int i = 0; i < seconds * 4; ++i) {
-        if (FindVirtualDisplay(out))
+        if (FindVirtualDisplay(out, knownBefore))
             return true;
         Sleep(250);
     }
     return false;
+}
+
+// Last resort when the display cannot be identified automatically.
+//
+// Better than failing: a display that exists but was not recognised is a
+// naming problem, and a person looking at their own monitors can resolve it in
+// one keystroke where the program cannot.
+bool AskWhichDisplay(DisplayInfo* out)
+{
+    std::vector<DisplayInfo> attached;
+    for (const auto& display : EnumerateDisplays()) {
+        if (display.attached)
+            attached.push_back(display);
+    }
+    if (attached.empty())
+        return false;
+
+    Blank();
+    Line(L"The driver installed, but setup could not tell which of these is the",
+         Tone::Warn);
+    Line(L"virtual display. These are attached right now:", Tone::Warn);
+    Blank();
+    for (size_t i = 0; i < attached.size(); ++i) {
+        Line(L"  " + std::to_wstring(i + 1) + L"  " + attached[i].deviceName +
+             L"  " + std::to_wstring(attached[i].width) + L"x" +
+             std::to_wstring(attached[i].height) + L"  " +
+             attached[i].description);
+    }
+    Blank();
+    Line(L"The virtual one is the display that was not there a minute ago. It is");
+    Line(L"not one of your monitors, so it is the entry you do not recognise.");
+    Blank();
+    std::fputws(L"Which number? (Enter to give up): ", stdout);
+    std::fflush(stdout);
+
+    wchar_t buffer[16] = {};
+    if (std::fgetws(buffer, 16, stdin) == nullptr)
+        return false;
+
+    const long choice = wcstol(buffer, nullptr, 10);
+    if (choice < 1 || static_cast<size_t>(choice) > attached.size())
+        return false;
+
+    *out = attached[static_cast<size_t>(choice) - 1];
+    return true;
 }
 
 HANDLE StartCompositor(const Paths& paths, const std::wstring& sourceName,
@@ -336,15 +382,21 @@ bool StepInstallDriver(const Paths& paths)
     return true;
 }
 
-bool StepArrangeDisplays(const Paths& paths)
+bool StepArrangeDisplays(const Paths& paths,
+                        const std::vector<std::wstring>& displaysBefore)
 {
     Heading(L"Setting up the displays");
 
     DisplayInfo virtualDisplay;
-    if (!WaitForVirtualDisplay(&virtualDisplay, kDisplayAppearSeconds)) {
-        Line(L"The driver installed, but no virtual display appeared.", Tone::Bad);
+    if (!WaitForVirtualDisplay(&virtualDisplay, kDisplayAppearSeconds,
+                               displaysBefore) &&
+        !AskWhichDisplay(&virtualDisplay)) {
+        Line(L"No virtual display appeared.", Tone::Bad);
         Line(L"Open Device Manager and look under Display adapters for");
-        Line(L"\"Visual-4k Virtual Display\"; an error code on it says why.");
+        Line(L"\"Visual-4k Virtual Display\". If it is there with a warning");
+        Line(L"triangle, its error code says why Windows would not start it;");
+        Line(L"code 52 means the signature was refused, which means test");
+        Line(L"signing is not actually on yet.");
         return false;
     }
     Line(L"  virtual display: " + virtualDisplay.deviceName + L" (" +
@@ -425,9 +477,14 @@ int DoInstall(const Paths& paths)
         return 1;
     if (!StepTestSigning())
         return 1;
+
+    // Recorded before the device exists, so the new display can be identified
+    // by being new rather than by being named what we expect.
+    const std::vector<std::wstring> displaysBefore = AttachedDisplayNames();
+
     if (!StepInstallDriver(paths))
         return 1;
-    if (!StepArrangeDisplays(paths))
+    if (!StepArrangeDisplays(paths, displaysBefore))
         return 1;
 
     Heading(L"Done");

@@ -28,10 +28,25 @@ struct DisplayInfo {
 
 std::vector<DisplayInfo> EnumerateDisplays();
 
-// Identifies the virtual display by the adapter description the INF gives it.
-// Returns false when it is not attached, which is the normal state before the
-// driver is installed and the signal that something went wrong after.
-bool FindVirtualDisplay(DisplayInfo* out);
+// Every attached display's device name, for the before-and-after comparison
+// below.
+std::vector<std::wstring> AttachedDisplayNames();
+
+// Identifies the virtual display, by three means in descending confidence:
+//
+//   1. Our name in the adapter's description or in the monitor's, the latter
+//      coming from the EDID the driver reports.
+//   2. Failing that, a display attached now that was not in `knownBefore` --
+//      which needs no name at all, and so cannot be defeated by Windows
+//      describing the device differently than expected.
+//   3. Nothing. The caller then asks.
+//
+// The layered approach is not defensiveness for its own sake: reporting "no
+// virtual display appeared" when one did appear under an unexpected name would
+// read as the driver having failed, and send the reader looking in the wrong
+// place entirely.
+bool FindVirtualDisplay(DisplayInfo* out,
+                        const std::vector<std::wstring>& knownBefore = {});
 
 // The physical panel to present on: any attached display that is not the
 // virtual one. Prefers the current primary, since that is the screen the user
