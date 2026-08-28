@@ -18,6 +18,29 @@
 
 ## ความเสี่ยง — อ่านก่อน
 
+### 0. เปิด PowerShell แบบ Administrator ให้ได้ก่อน
+
+การตรวจสองข้อข้างล่างนี้ **อ่านสถานะเครื่องระดับระบบ** ทั้งคู่ Windows จึงไม่ยอมให้
+ผู้ใช้ธรรมดารัน ถ้ารันผิดหน้าต่างจะได้ `Access was denied.` แล้วเข้าใจผิดว่าเครื่องมีปัญหา
+ทั้งที่แค่สิทธิ์ไม่พอ
+
+วิธีเปิด: กด **Win** → พิมพ์ `powershell` → **คลิกขวา** ที่ Windows PowerShell →
+**Run as administrator** → กด Yes ที่กล่อง UAC
+
+สังเกตว่าเปิดถูกหน้าต่างไหม — หน้าต่างที่ยกสิทธิ์แล้วจะเริ่มที่
+`PS C:\WINDOWS\system32>` ไม่ใช่โฟลเดอร์ที่คุณอยู่ก่อนหน้า และแถบชื่อหน้าต่าง
+ขึ้นคำว่า Administrator หรือจะให้แน่ก็สั่ง:
+
+```powershell
+([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+```
+
+ต้องได้ `True` ถ้าได้ `False` คือยังไม่ได้ยกสิทธิ์ อย่าเพิ่งรันคำสั่งถัดไป
+
+**ถ้าเปิดแบบ Administrator ไม่ได้เลย** (เครื่องขององค์กร ไม่มีสิทธิ์ admin) — หยุดตรงนี้
+การติดตั้งไดรเวอร์ต้องใช้สิทธิ์ admin อยู่ดี ทำต่อไม่ได้ แต่ตัวคอมโพสิเตอร์
+(`visual4k-host.exe`) ใช้งานได้ตามปกติโดยไม่ต้องมีสิทธิ์อะไรเป็นพิเศษ
+
 ### 1. BitLocker อาจขอ recovery key
 
 `bcdedit /set testsigning on` **แก้ boot configuration** ถ้าเครื่องคุณเปิด BitLocker
@@ -55,6 +78,15 @@ Confirm-SecureBootUEFI
 ```
 
 `True` = เปิดอยู่ ต้องปิดใน UEFI (กด Del/F2/F12 ตอนบูต ต่างกันตามยี่ห้อ)
+
+ถ้าอยากดูสถานะ Secure Boot โดยไม่ต้องยกสิทธิ์ ค่านี้อ่านได้จากรีจิสทรีด้วยสิทธิ์ธรรมดา:
+
+```powershell
+(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State' -Name UEFISecureBootEnabled -ErrorAction SilentlyContinue).UEFISecureBootEnabled
+```
+
+`1` = เปิด, `0` = ปิด, ไม่ได้อะไรเลย = เครื่องบูตแบบ legacy BIOS (ไม่มี Secure Boot)
+หรือจะเปิด `msinfo32` แล้วดูบรรทัด Secure Boot State ก็ได้เหมือนกัน
 
 คำสั่งนี้ก็ต้องรันแบบ Administrator เช่นกัน ไม่งั้นจะได้
 `Unable to set proper privileges. Access was denied.`
