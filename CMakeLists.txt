@@ -18,12 +18,18 @@ add_executable(taptable_selftest
     host/visual4k-host/src/TapTable.cpp)
 target_include_directories(taptable_selftest PRIVATE host/visual4k-host/src)
 
+add_executable(cursor_selftest
+    tools/cursor_selftest.cpp
+    host/visual4k-host/src/CursorDecoder.cpp)
+target_include_directories(cursor_selftest PRIVATE host/visual4k-host/src)
+
 add_executable(edid_selftest
     tools/edid_selftest.cpp
     driver/Visual4kDisplay/Edid.cpp)
 target_include_directories(edid_selftest PRIVATE driver/Visual4kDisplay)
 
 add_test(NAME edid COMMAND edid_selftest)
+add_test(NAME cursor COMMAND cursor_selftest)
 add_test(NAME taptable_parity
          COMMAND ${CMAKE_COMMAND} -E env
                  python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/compare_taptable.py)

@@ -12,6 +12,7 @@ mkdir -p build/hostcheck
 CXX=${CXX:-g++}
 SOURCES=(
     host/visual4k-host/src/TapTable.cpp
+    host/visual4k-host/src/CursorDecoder.cpp
     host/visual4k-host/src/Renderer.cpp
     host/visual4k-host/src/Duplicator.cpp
     host/visual4k-host/src/main.cpp

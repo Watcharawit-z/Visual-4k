@@ -84,3 +84,19 @@ def test_virtual_monitor_edid_is_valid(tmp_path_factory):
         check=True, capture_output=True)
     result = subprocess.run([str(out)], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout
+
+
+def test_cursor_shape_decoder(tmp_path_factory):
+    """Windows' three cursor formats, two of which XOR with the screen.
+
+    A wrong decode is the difference between a working desktop and one with no
+    cursor, or an I-beam that vanishes over dark backgrounds.
+    """
+    out = tmp_path_factory.mktemp("cursor") / "cursor_selftest"
+    subprocess.run(
+        [CXX, "-O2", "-std=c++17", "-I", str(ROOT / "host/visual4k-host/src"),
+         str(ROOT / "tools/cursor_selftest.cpp"),
+         str(ROOT / "host/visual4k-host/src/CursorDecoder.cpp"), "-o", str(out)],
+        check=True, capture_output=True)
+    result = subprocess.run([str(out)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout

@@ -20,6 +20,7 @@
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 
+#include "CursorDecoder.h"
 #include "TapTable.h"
 
 namespace visual4k {
@@ -72,6 +73,15 @@ public:
     // texture at the destination geometry.
     HRESULT Render(ID3D11Texture2D* source, ID3D11Texture2D* target);
 
+    // Composites the pointer onto `target`, scaling it by the resolve ratio so
+    // it ends up the size it would be on a real 4K panel.
+    //
+    // `sourceX`/`sourceY` are the shape's top-left in source pixels.
+    // `generation` lets the upload be skipped while the shape is unchanged,
+    // which is almost every frame.
+    HRESULT DrawCursor(ID3D11Texture2D* target, const DecodedCursor& shape,
+                       uint64_t generation, int32_t sourceX, int32_t sourceY);
+
     // Set when the last Resize() rebuilt the tables; useful for logging.
     uint32_t HorizontalTapCount() const { return horizontalTaps_.tapCount; }
     uint32_t VerticalTapCount() const { return verticalTaps_.tapCount; }
@@ -88,6 +98,15 @@ private:
     static_assert(sizeof(ResolveConstants) % 16 == 0,
                   "constant buffers must be 16-byte aligned");
 
+    struct CursorConstants {
+        int32_t destOrigin[2];
+        uint32_t destSize[2];
+        uint32_t targetSize[2];
+        float invDestSize[2];
+    };
+    static_assert(sizeof(CursorConstants) % 16 == 0,
+                  "constant buffers must be 16-byte aligned");
+
     struct SharpenConstants {
         uint32_t size[2];
         float sharpness;
@@ -96,6 +115,7 @@ private:
     static_assert(sizeof(SharpenConstants) % 16 == 0,
                   "constant buffers must be 16-byte aligned");
 
+    HRESULT UploadCursorShape(const DecodedCursor& shape);
     HRESULT CompileShader(const std::wstring& path, const char* entry,
                           ID3D11ComputeShader** out);
     HRESULT UploadTapTable(const TapTable& table,
@@ -118,9 +138,18 @@ private:
 
     ComPtr<ID3D11ComputeShader> resolveCs_;
     ComPtr<ID3D11ComputeShader> sharpenCs_;
+    ComPtr<ID3D11ComputeShader> cursorCs_;
 
     ComPtr<ID3D11Buffer> resolveCb_;
     ComPtr<ID3D11Buffer> sharpenCb_;
+    ComPtr<ID3D11Buffer> cursorCb_;
+
+    ComPtr<ID3D11SamplerState> linearSampler_;
+    ComPtr<ID3D11ShaderResourceView> cursorSrv_;
+    ComPtr<ID3D11ShaderResourceView> cursorInvertSrv_;
+    uint64_t cursorGeneration_ = 0;
+    uint32_t cursorWidth_ = 0;
+    uint32_t cursorHeight_ = 0;
 
     // (DstW x SrcH) after the horizontal pass, then (DstW x DstH) after the
     // vertical one. Kept at 16-bit float: 8-bit here would quantise twice and

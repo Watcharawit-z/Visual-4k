@@ -87,6 +87,12 @@ struct WNDCLASSEXW {
 #define WM_CLOSE   0x0010
 #define WM_DESTROY 0x0002
 #define WM_KEYDOWN 0x0100
+#define WM_HOTKEY  0x0312
+#define MOD_ALT 0x0001
+#define MOD_CONTROL 0x0002
+#define MOD_SHIFT 0x0004
+#define MOD_NOREPEAT 0x4000
+#define VK_F12 0x7B
 #define VK_ESCAPE  0x1B
 #define PM_REMOVE  0x0001
 #define WS_POPUP   0x80000000L
@@ -117,6 +123,8 @@ HCURSOR LoadCursorW(HINSTANCE, LPCWSTR);
 void Sleep(DWORD);
 BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT);
 void OutputDebugStringA(LPCSTR);
+BOOL RegisterHotKey(HWND, int, UINT, UINT);
+BOOL UnregisterHotKey(HWND, int);
 HANDLE CreateEventW(void*, BOOL, BOOL, LPCWSTR);
 BOOL SetEvent(HANDLE);
 BOOL CloseHandle(HANDLE);

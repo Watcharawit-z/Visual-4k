@@ -7,6 +7,7 @@ enum DXGI_FORMAT {
     DXGI_FORMAT_UNKNOWN = 0,
     DXGI_FORMAT_R16G16B16A16_FLOAT = 10,
     DXGI_FORMAT_R8G8B8A8_UNORM = 28,
+    DXGI_FORMAT_R8_UNORM = 61,
     DXGI_FORMAT_B8G8R8A8_UNORM = 87,
 };
 
@@ -42,12 +43,23 @@ struct DXGI_SWAP_CHAIN_DESC1 {
     UINT Flags;
 };
 
+struct DXGI_OUTDUPL_POINTER_POSITION { POINT Position; BOOL Visible; };
+
+struct DXGI_OUTDUPL_POINTER_SHAPE_INFO {
+    UINT Type; UINT Width; UINT Height; UINT Pitch; POINT HotSpot;
+};
+
+#define DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME   0x1
+#define DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR        0x2
+#define DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR 0x4
+
 struct DXGI_OUTDUPL_FRAME_INFO {
     LONGLONG LastPresentTime;
     LONGLONG LastMouseUpdateTime;
     UINT AccumulatedFrames;
     BOOL RectsCoalesced;
     BOOL ProtectedContentMaskedOut;
+    DXGI_OUTDUPL_POINTER_POSITION PointerPosition;
     UINT TotalMetadataBufferSize;
     UINT PointerShapeBufferSize;
 };
@@ -68,6 +80,8 @@ struct IDXGIResource : public IDXGIDeviceSubObject {};
 struct IDXGIOutputDuplication : public IDXGIObject {
     virtual HRESULT STDMETHODCALLTYPE AcquireNextFrame(
         UINT, DXGI_OUTDUPL_FRAME_INFO*, IDXGIResource**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetFramePointerShape(
+        UINT, void*, UINT*, DXGI_OUTDUPL_POINTER_SHAPE_INFO*) = 0;
     virtual HRESULT STDMETHODCALLTYPE ReleaseFrame() = 0;
 };
 

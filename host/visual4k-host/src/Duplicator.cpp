@@ -1,6 +1,7 @@
 #include "Duplicator.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace visual4k {
 
@@ -100,6 +101,47 @@ HRESULT Duplicator::Initialize(ID3D11Device* device, const std::wstring& deviceN
     return DXGI_ERROR_NOT_FOUND;
 }
 
+HRESULT Duplicator::UpdatePointer(const DXGI_OUTDUPL_FRAME_INFO& info)
+{
+    // Visibility and position arrive on every frame that touched the pointer.
+    // LastMouseUpdateTime of 0 means it did not move, so the previous position
+    // still stands.
+    if (info.LastMouseUpdateTime != 0) {
+        pointer_.visible = info.PointerPosition.Visible != FALSE;
+        pointer_.x = info.PointerPosition.Position.x;
+        pointer_.y = info.PointerPosition.Position.y;
+    }
+
+    // The shape only comes down when it changes, which is why it is cached.
+    if (info.PointerShapeBufferSize == 0)
+        return S_OK;
+
+    if (shapeBuffer_.size() < info.PointerShapeBufferSize)
+        shapeBuffer_.resize(info.PointerShapeBufferSize);
+
+    DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo = {};
+    UINT required = 0;
+    HRESULT hr = duplication_->GetFramePointerShape(
+        static_cast<UINT>(shapeBuffer_.size()), shapeBuffer_.data(), &required,
+        &shapeInfo);
+    if (FAILED(hr))
+        return hr;
+
+    auto decoded = DecodePointerShape(
+        static_cast<PointerShapeType>(shapeInfo.Type), shapeBuffer_.data(),
+        required, shapeInfo.Width, shapeInfo.Height, shapeInfo.Pitch);
+
+    if (decoded.Empty()) {
+        // An unknown or malformed shape should leave the previous cursor in
+        // place rather than blanking it -- a stale cursor beats none.
+        return S_OK;
+    }
+
+    pointer_.shape = std::move(decoded);
+    pointer_.shapeGeneration++;
+    return S_OK;
+}
+
 HRESULT Duplicator::AcquireFrame(uint32_t timeoutMs, ID3D11Texture2D** frame,
                                  DXGI_OUTDUPL_FRAME_INFO* info)
 {
@@ -118,6 +160,10 @@ HRESULT Duplicator::AcquireFrame(uint32_t timeoutMs, ID3D11Texture2D** frame,
         return hr;
 
     frameHeld_ = true;
+
+    // A pointer update can arrive on a frame with no image change at all, so
+    // this runs before the image is unpacked and its failure is not fatal.
+    UpdatePointer(*info);
 
     hr = resource.As(&acquired_);
     if (FAILED(hr)) {

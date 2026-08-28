@@ -20,6 +20,8 @@
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 
+#include "CursorDecoder.h"
+
 namespace visual4k {
 
 template <typename T>
@@ -30,6 +32,24 @@ struct OutputInfo {
     uint32_t width = 0;
     uint32_t height = 0;
     bool attachedToDesktop = false;
+};
+
+// Where the pointer is and what it looks like.
+//
+// Desktop Duplication reports the shape only when it *changes*, so the decoded
+// shape has to be held across frames; a caller that reads it fresh each frame
+// sees a cursor that vanishes as soon as it stops changing.
+struct PointerState {
+    // Top-left of the shape in source pixels. DXGI already applies the hot
+    // spot, so subtracting it again shifts the cursor by its own offset --
+    // a small, plausible-looking, very confusing bug.
+    int32_t x = 0;
+    int32_t y = 0;
+    bool visible = false;
+    DecodedCursor shape;
+    // Bumped whenever `shape` changes, so the renderer can skip re-uploading
+    // an unchanged bitmap on every frame.
+    uint64_t shapeGeneration = 0;
 };
 
 class Duplicator {
@@ -50,6 +70,8 @@ public:
                          DXGI_OUTDUPL_FRAME_INFO* info);
     void ReleaseFrame();
 
+    const PointerState& Pointer() const { return pointer_; }
+
     uint32_t Width() const { return width_; }
     uint32_t Height() const { return height_; }
     const std::wstring& DeviceName() const { return deviceName_; }
@@ -66,6 +88,11 @@ private:
     uint32_t width_ = 0;
     uint32_t height_ = 0;
     bool frameHeld_ = false;
+
+    HRESULT UpdatePointer(const DXGI_OUTDUPL_FRAME_INFO& info);
+
+    PointerState pointer_;
+    std::vector<uint8_t> shapeBuffer_;
 };
 
 }  // namespace visual4k

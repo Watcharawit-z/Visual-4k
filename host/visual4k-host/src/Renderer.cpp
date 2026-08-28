@@ -2,6 +2,7 @@
 
 #include <d3dcompiler.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -36,6 +37,10 @@ HRESULT Renderer::Initialize(ID3D11Device* device, ID3D11DeviceContext* context,
                        sharpenCs_.ReleaseAndGetAddressOf());
     if (FAILED(hr)) return hr;
 
+    hr = CompileShader(shaderDir_ + L"\\cursor.hlsl", "CSMain",
+                       cursorCs_.ReleaseAndGetAddressOf());
+    if (FAILED(hr)) return hr;
+
     D3D11_BUFFER_DESC cb = {};
     cb.Usage = D3D11_USAGE_DYNAMIC;
     cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
@@ -49,6 +54,128 @@ HRESULT Renderer::Initialize(ID3D11Device* device, ID3D11DeviceContext* context,
     hr = device_->CreateBuffer(&cb, nullptr, sharpenCb_.ReleaseAndGetAddressOf());
     if (FAILED(hr)) return hr;
 
+    cb.ByteWidth = sizeof(CursorConstants);
+    hr = device_->CreateBuffer(&cb, nullptr, cursorCb_.ReleaseAndGetAddressOf());
+    if (FAILED(hr)) return hr;
+
+    // Bilinear, clamped: the cursor is magnified or minified by the resolve
+    // ratio, and clamping stops the filter pulling in whatever happens to sit
+    // next to the bitmap in memory at its edges.
+    D3D11_SAMPLER_DESC sd = {};
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    sd.MaxLOD = 0.0f;
+    hr = device_->CreateSamplerState(&sd, linearSampler_.ReleaseAndGetAddressOf());
+    if (FAILED(hr)) return hr;
+
+    return S_OK;
+}
+
+HRESULT Renderer::UploadCursorShape(const DecodedCursor& shape)
+{
+    auto upload = [&](DXGI_FORMAT format, const void* pixels, UINT stride,
+                      ComPtr<ID3D11ShaderResourceView>& srv) -> HRESULT {
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = shape.width;
+        td.Height = shape.height;
+        td.MipLevels = 1;
+        td.ArraySize = 1;
+        td.Format = format;
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_IMMUTABLE;
+        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        D3D11_SUBRESOURCE_DATA init = {};
+        init.pSysMem = pixels;
+        init.SysMemPitch = shape.width * stride;
+
+        ComPtr<ID3D11Texture2D> texture;
+        HRESULT hr = device_->CreateTexture2D(&td, &init, texture.GetAddressOf());
+        if (FAILED(hr)) return hr;
+
+        return device_->CreateShaderResourceView(texture.Get(), nullptr,
+                                                 srv.ReleaseAndGetAddressOf());
+    };
+
+    HRESULT hr = upload(DXGI_FORMAT_R8G8B8A8_UNORM, shape.rgba.data(), 4,
+                        cursorSrv_);
+    if (FAILED(hr)) return hr;
+
+    hr = upload(DXGI_FORMAT_R8_UNORM, shape.invert.data(), 1, cursorInvertSrv_);
+    if (FAILED(hr)) return hr;
+
+    cursorWidth_ = shape.width;
+    cursorHeight_ = shape.height;
+    return S_OK;
+}
+
+HRESULT Renderer::DrawCursor(ID3D11Texture2D* target, const DecodedCursor& shape,
+                             uint64_t generation, int32_t sourceX,
+                             int32_t sourceY)
+{
+    if (target == nullptr || shape.Empty() || !cursorCs_)
+        return S_OK;                    // nothing to draw is not an error
+    if (srcWidth_ == 0 || srcHeight_ == 0)
+        return E_NOT_VALID_STATE;
+
+    if (generation != cursorGeneration_ || !cursorSrv_) {
+        HRESULT hr = UploadCursorShape(shape);
+        if (FAILED(hr)) return hr;
+        cursorGeneration_ = generation;
+    }
+
+    if (target != cachedTarget_) {
+        HRESULT hr = device_->CreateUnorderedAccessView(
+            target, nullptr, targetUav_.ReleaseAndGetAddressOf());
+        if (FAILED(hr)) return hr;
+        cachedTarget_ = target;
+    }
+
+    // Scale the cursor by the same ratio as everything else, so it ends up the
+    // size it would be on a real 4K panel rather than looming over content
+    // that shrank around it.
+    const double scaleX = static_cast<double>(dstWidth_) / srcWidth_;
+    const double scaleY = static_cast<double>(dstHeight_) / srcHeight_;
+
+    // Clamped to 1: a large downscale ratio can round a thin cursor to zero
+    // pixels, and a zero-sized dispatch silently draws nothing.
+    const auto destW = static_cast<uint32_t>(
+        std::max<long>(1, std::lround(cursorWidth_ * scaleX)));
+    const auto destH = static_cast<uint32_t>(
+        std::max<long>(1, std::lround(cursorHeight_ * scaleY)));
+
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    HRESULT hr = context_->Map(cursorCb_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0,
+                               &mapped);
+    if (FAILED(hr)) return hr;
+
+    auto* c = static_cast<CursorConstants*>(mapped.pData);
+    c->destOrigin[0] = static_cast<int32_t>(std::lround(sourceX * scaleX));
+    c->destOrigin[1] = static_cast<int32_t>(std::lround(sourceY * scaleY));
+    c->destSize[0] = destW;
+    c->destSize[1] = destH;
+    c->targetSize[0] = dstWidth_;
+    c->targetSize[1] = dstHeight_;
+    c->invDestSize[0] = 1.0f / static_cast<float>(destW);
+    c->invDestSize[1] = 1.0f / static_cast<float>(destH);
+    context_->Unmap(cursorCb_.Get(), 0);
+
+    ID3D11ShaderResourceView* srvs[2] = {cursorSrv_.Get(), cursorInvertSrv_.Get()};
+    ID3D11Buffer* cbs[1] = {cursorCb_.Get()};
+    ID3D11UnorderedAccessView* uavs[1] = {targetUav_.Get()};
+    ID3D11SamplerState* samplers[1] = {linearSampler_.Get()};
+
+    context_->CSSetShader(cursorCs_.Get(), nullptr, 0);
+    context_->CSSetConstantBuffers(0, 1, cbs);
+    context_->CSSetShaderResources(0, 2, srvs);
+    context_->CSSetSamplers(0, 1, samplers);
+    context_->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+    context_->Dispatch(DispatchCount(destW), DispatchCount(destH), 1);
+
+    UnbindComputeStage();
     return S_OK;
 }
 

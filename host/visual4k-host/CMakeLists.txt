@@ -21,6 +21,7 @@ add_executable(visual4k-host
     src/Renderer.cpp
     src/Duplicator.cpp
     src/TapTable.cpp
+    src/CursorDecoder.cpp
 )
 
 target_compile_definitions(visual4k-host PRIVATE

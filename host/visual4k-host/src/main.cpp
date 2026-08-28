@@ -11,6 +11,11 @@
 //     --linear                 resolve in linear light (video; see docs)
 //     --shaders <dir>          shader directory (default: .\shaders)
 //     --vsync <0|1>            default 1
+//     --no-cursor              do not composite the mouse pointer
+//
+// Quit with Ctrl+Alt+F12 from anywhere, or Esc while the window has focus.
+// The global hotkey matters more than it sounds: once you click into the
+// virtual desktop the compositor loses focus, and Esc stops reaching it.
 //
 // The window is created borderless and topmost on the physical panel. It is
 // deliberately a normal window rather than an exclusive-fullscreen swapchain:
@@ -43,7 +48,11 @@ struct Options {
     RendererSettings renderer;
     bool listDisplays = false;
     bool vsync = true;
+    bool drawCursor = true;
 };
+
+// Any value works; it only has to be unique within this process.
+constexpr int kQuitHotkeyId = 1;
 
 HWND g_window = nullptr;
 bool g_running = true;
@@ -55,6 +64,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         case WM_DESTROY:
             g_running = false;
             return 0;
+        case WM_HOTKEY:
+            if (wparam == kQuitHotkeyId) {
+                g_running = false;
+                return 0;
+            }
+            break;
         case WM_KEYDOWN:
             if (wparam == VK_ESCAPE) {
                 g_running = false;
@@ -104,6 +119,8 @@ bool ParseOptions(int argc, wchar_t** argv, Options* opt)
             const wchar_t* v = next(L"--sharpness");
             if (!v) return false;
             opt->renderer.sharpnessStops = wcstof(v, nullptr);
+        } else if (arg == L"--no-cursor") {
+            opt->drawCursor = false;
         } else if (arg == L"--denoise") {
             opt->renderer.denoise = true;
         } else if (arg == L"--linear") {
@@ -233,6 +250,17 @@ int wmain(int argc, wchar_t** argv)
     // tear the desktop we are compositing out from under DWM.
     factory->MakeWindowAssociation(g_window, DXGI_MWA_NO_ALT_ENTER);
 
+    // Esc only works while this window has focus, and it loses focus the
+    // moment you click into the virtual desktop it is displaying. Without a
+    // global hotkey the only way out is Task Manager.
+    if (!RegisterHotKey(g_window, kQuitHotkeyId,
+                        MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_F12)) {
+        std::fwprintf(stderr,
+                      L"warning: could not register Ctrl+Alt+F12; another "
+                      L"program owns it. Quit with Esc while focused, or from "
+                      L"Task Manager.\n");
+    }
+
     Renderer renderer;
     renderer.SetSettings(opt.renderer);
     hr = renderer.Initialize(device.Get(), context.Get(), opt.shaderDir);
@@ -243,9 +271,11 @@ int wmain(int argc, wchar_t** argv)
         return 1;
     }
 
-    std::wprintf(L"panel : %dx%d, kernel %hs, sharpness %.2f stops\n",
+    std::wprintf(L"panel : %dx%d, kernel %hs, sharpness %.2f stops, cursor %ls\n",
                  panelW, panelH, KernelName(opt.renderer.kernel),
-                 opt.renderer.sharpnessStops);
+                 opt.renderer.sharpnessStops,
+                 opt.drawCursor ? L"on" : L"off");
+    std::wprintf(L"quit  : Ctrl+Alt+F12 (or Esc while focused)\n");
 
     ComPtr<ID3D11Texture2D> backBuffer;
     swapChain->GetBuffer(0, IID_PPV_ARGS(backBuffer.GetAddressOf()));
@@ -281,6 +311,18 @@ int wmain(int argc, wchar_t** argv)
         }
 
         hr = renderer.Render(frame, backBuffer.Get());
+
+        // Desktop Duplication does not draw the pointer into the frame, so a
+        // desktop without this call has no cursor at all.
+        if (SUCCEEDED(hr) && opt.drawCursor) {
+            const auto& pointer = duplicator.Pointer();
+            if (pointer.visible && !pointer.shape.Empty()) {
+                hr = renderer.DrawCursor(backBuffer.Get(), pointer.shape,
+                                         pointer.shapeGeneration,
+                                         pointer.x, pointer.y);
+            }
+        }
+
         duplicator.ReleaseFrame();
 
         if (FAILED(hr)) {
@@ -291,5 +333,6 @@ int wmain(int argc, wchar_t** argv)
         swapChain->Present(opt.vsync ? 1 : 0, 0);
     }
 
+    UnregisterHotKey(g_window, kQuitHotkeyId);
     return 0;
 }

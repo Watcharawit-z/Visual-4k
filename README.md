@@ -116,6 +116,10 @@ python tools/visual4k.py compare shot-4k.png cmp.png    # สกรีนช็�
 `compare` ซ้อนสามภาพให้เทียบ (point sample / bilinear / visual4k) พร้อม PSNR และ SSIM
 ทำงานได้ทั้ง Windows, Linux และ macOS
 
+> **อ่านก่อนติดตั้งไดรเวอร์:** [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md)
+> มีคำเตือนสองข้อที่ทำผิดแล้วอาจเข้า Windows ไม่ได้ (BitLocker recovery key และ
+> Secure Boot)
+
 ### ขั้นที่ 1 — build
 
 **ต้องมี:** Windows 10 build 16299 ขึ้นไป, GPU ที่รองรับ D3D11, CMake,
@@ -197,8 +201,9 @@ cmake -B build -S . && cmake --build build && ctest --test-dir build
 
 | ส่วน | สถานะ |
 |---|---|
-| แกนการ resample + เมตริก | ทดสอบแล้ว **76 tests ผ่าน** |
+| แกนการ resample + เมตริก | ทดสอบแล้ว **77 tests ผ่าน** |
 | CLI ออฟไลน์ | ใช้งานได้จริง ทดสอบแล้ว |
+| ตัวถอดรหัสเคอร์เซอร์ | ตรวจสอบแล้วครบสามรูปแบบ รวมเคส invert |
 | C++/Python tap table parity | ตรวจสอบแล้ว (delta 3e-8) |
 | EDID ของจอเสมือน | ตรวจสอบแล้ว (checksum + timing 60.00 Hz) |
 | คอมโพสิเตอร์ D3D11 | ผ่าน type-check กับ stub headers **ยังไม่ได้ build จริง** |
