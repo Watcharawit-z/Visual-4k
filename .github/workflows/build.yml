@@ -52,6 +52,27 @@ jobs:
       - name: Type-check the Windows host sources against the stubs
         run: ./tools/check-host-compiles.sh
 
+      # A syntax error in an install script only surfaces when a user runs it,
+      # by which point they have already downloaded a release. pwsh parses on
+      # Linux, so this costs nothing.
+      - name: Parse the PowerShell scripts
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem tools -Filter *.ps1 | ForEach-Object {
+              $errors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile(
+                  $_.FullName, [ref]$null, [ref]$errors) | Out-Null
+              if ($errors) {
+                  Write-Host "FAILED $($_.Name)"
+                  $errors | ForEach-Object { Write-Host "  $($_.Message)" }
+                  $bad++
+              } else {
+                  Write-Host "ok     $($_.Name)"
+              }
+          }
+          if ($bad) { throw "$bad script(s) have syntax errors" }
+
   compositor:
     name: compositor (visual4k-host)
     runs-on: windows-latest
@@ -327,14 +348,62 @@ jobs:
           if (-not $dll) { throw "build reported success but produced no DLL" }
           Write-Host "built: $($dll[0].FullName)"
 
-      - name: Stage the package
+      - name: Stage and sign the package
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+
           $out = "package/Visual4kDisplay"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Get-ChildItem -Recurse driver/Visual4kDisplay/x64 |
-              Where-Object { $_.Extension -in ".dll",".inf",".pdb",".cat" } |
+              Where-Object { $_.Extension -in ".dll",".inf",".pdb" } |
               ForEach-Object { Copy-Item $_.FullName $out }
+
+          # Sign here rather than on the user's machine. inf2cat and signtool
+          # ship with the WDK and the SDK, and requiring those to install a
+          # release defeats the point of shipping binaries at all.
+          #
+          # The private key lives only in this job and is never exported; only
+          # the public certificate goes into the package, so nothing outside
+          # this run can sign anything Windows would then trust.
+          function Find-KitTool($name) {
+              Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter $name `
+                  -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Sort-Object FullName -Descending | Select-Object -First 1
+          }
+          $inf2cat = Find-KitTool 'inf2cat.exe'
+          $signtool = Find-KitTool 'signtool.exe'
+          if (-not $inf2cat) { throw "inf2cat.exe not found" }
+          if (-not $signtool) { throw "signtool.exe not found" }
+
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert `
+                      -Subject "CN=Visual-4k Build Certificate" `
+                      -CertStoreLocation Cert:\CurrentUser\My `
+                      -KeyUsage DigitalSignature `
+                      -NotAfter (Get-Date).AddYears(5)
+          Write-Host "signing certificate thumbprint: $($cert.Thumbprint)"
+
+          & $inf2cat.FullName /driver:$out /os:10_X64 /uselocaltime
+          if ($LASTEXITCODE -ne 0) { throw "inf2cat failed" }
+
+          $cat = Join-Path $out 'Visual4kDisplay.cat'
+          if (-not (Test-Path $cat)) { throw "inf2cat produced no catalog" }
+
+          foreach ($file in @($cat, (Join-Path $out 'Visual4kDisplay.dll'))) {
+              & $signtool.FullName sign /fd SHA256 /sha1 $cert.Thumbprint `
+                  /t http://timestamp.digicert.com $file
+              if ($LASTEXITCODE -ne 0) { throw "signing $file failed" }
+          }
+
+          Export-Certificate -Cert $cert `
+              -FilePath (Join-Path $out 'Visual4k-Build-Certificate.cer') | Out-Null
+
+          & $signtool.FullName verify /pa /v $cat
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "::warning::signtool verify reported a problem; the certificate is not yet trusted on this runner, which is expected"
+          }
+
           Get-ChildItem $out | Select-Object Name, Length
 
       - uses: actions/upload-artifact@v4
@@ -378,6 +447,11 @@ jobs:
           if (-not (Test-Path "$root/visual4k-host.exe")) { throw "compositor missing" }
           if (-not (Test-Path "$root/shaders")) { throw "shaders missing" }
           if (-not (Get-ChildItem "$root/driver" -Filter *.dll)) { throw "driver DLL missing" }
+
+          # Without these the archive falls back to needing the WDK, which is
+          # exactly what shipping binaries is meant to avoid.
+          if (-not (Get-ChildItem "$root/driver" -Filter *.cat)) { throw "signed catalog missing" }
+          if (-not (Get-ChildItem "$root/driver" -Filter *.cer)) { throw "signing certificate missing" }
 
           Compress-Archive -Path $root -DestinationPath "Visual-4k-$env:RELEASE_TAG.zip"
           Get-ChildItem -Recurse $root | Select-Object FullName
