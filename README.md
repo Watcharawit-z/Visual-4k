@@ -102,6 +102,26 @@ Manage 3D Settings → DSR - Factors ข้อได้เปรียบขอ�
 
 ## เริ่มใช้งาน
 
+### ดาวน์โหลดไฟล์ที่ build แล้ว
+
+ทุก push ถูก build บน Windows runner จริงและแนบไฟล์ผลลัพธ์ไว้ให้ ไม่ต้องติดตั้ง
+Visual Studio หรือ WDK เอง:
+
+- **[Releases](https://github.com/Watcharawit-z/Visual-4k/releases)** — zip
+  ก้อนเดียว มีทั้งคอมโพสิเตอร์ ไดรเวอร์ สคริปต์ติดตั้ง และคู่มือ
+- **[Actions](https://github.com/Watcharawit-z/Visual-4k/actions)** — ไฟล์จาก
+  commit ล่าสุด (ต้อง sign in GitHub เพื่อโหลด artifact)
+
+ติดตั้งด้วยคำสั่งเดียว:
+
+```powershell
+# เฉพาะคอมโพสิเตอร์ — ไม่ต้องเซ็นไดรเวอร์ ไม่ต้อง reboot
+.\tools\Install-Visual4k.ps1 -CompositorOnly
+
+# ทั้งหมด (ต้องอ่านความเสี่ยงใน GETTING-STARTED.md ก่อน)
+.\tools\Install-Visual4k.ps1
+```
+
 ### ขั้นที่ 0 — ลองดูผลก่อน โดยไม่ต้องติดตั้งอะไร
 
 ก่อนจะลงแรงกับไดรเวอร์ ดูก่อนว่าฟิลเตอร์นี้ทำอะไรกับ *ภาพของคุณเอง* ใช้แค่ Python:

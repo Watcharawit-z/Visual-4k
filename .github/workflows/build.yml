@@ -206,6 +206,25 @@ jobs:
           Write-Host ""
           Write-Host "WindowsUserModeDriver10.0 is registered."
 
+      # The previous run proved the toolset is registered yet CL still ran
+      # with the ordinary C++ include paths, so ask MSBuild what it actually
+      # resolved rather than guessing at the project file again.
+      - name: Show what MSBuild resolved
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
+                  /p:Configuration=Release /p:Platform=x64 `
+                  /getProperty:PlatformToolset `
+                  /getProperty:ConfigurationType `
+                  /getProperty:DriverType `
+                  /getProperty:WDKContentRoot `
+                  /getProperty:WindowsTargetPlatformVersion `
+                  /getProperty:IncludePath
+          Write-Host "--- toolset directory contents ---"
+          Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\Platforms\x64\PlatformToolsets\WindowsUserModeDriver10.0" `
+              -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+
       - name: Build the driver
         shell: pwsh
         run: |
