@@ -102,21 +102,60 @@ Manage 3D Settings → DSR - Factors ข้อได้เปรียบขอ�
 
 ## เริ่มใช้งาน
 
-**ต้องมี:** Windows 10 build 16299 ขึ้นไป, GPU ที่รองรับ D3D11,
-[Visual Studio + WDK](https://learn.microsoft.com/windows-hardware/drivers/download-the-wdk)
-สำหรับไดรเวอร์ และ CMake สำหรับคอมโพสิเตอร์
+### ขั้นที่ 0 — ลองดูผลก่อน โดยไม่ต้องติดตั้งอะไร
 
-ขั้นตอนติดตั้งเต็ม รวมเรื่องการเซ็นไดรเวอร์: [`docs/BUILD-WINDOWS.md`](docs/BUILD-WINDOWS.md)
+ก่อนจะลงแรงกับไดรเวอร์ ดูก่อนว่าฟิลเตอร์นี้ทำอะไรกับ *ภาพของคุณเอง* ใช้แค่ Python:
+
+```bash
+pip install numpy pillow
+
+python tools/visual4k.py demo demo.png                  # scene สังเคราะห์
+python tools/visual4k.py compare shot-4k.png cmp.png    # สกรีนช็อต 4K ของคุณ
+```
+
+`compare` ซ้อนสามภาพให้เทียบ (point sample / bilinear / visual4k) พร้อม PSNR และ SSIM
+ทำงานได้ทั้ง Windows, Linux และ macOS
+
+### ขั้นที่ 1 — build
+
+**ต้องมี:** Windows 10 build 16299 ขึ้นไป, GPU ที่รองรับ D3D11, CMake,
+Visual Studio และ [WDK](https://learn.microsoft.com/windows-hardware/drivers/download-the-wdk)
+(เฉพาะไดรเวอร์)
 
 ```powershell
-# คอมโพสิเตอร์
-cmake -B build -S . -A x64
-cmake --build build --config Release
+.\tools\build.ps1
+```
 
-# ดูว่ามีจออะไรบ้าง
-.\build\host\visual4k-host\Release\visual4k-host.exe --list-displays
+สคริปต์นี้ build คอมโพสิเตอร์ รัน self-test แล้ว build ไดรเวอร์ ถ้าไม่มี WDK มันจะ
+ข้ามไดรเวอร์และบอกให้ทราบ ไม่ถือว่าล้มเหลว — คอมโพสิเตอร์ใช้งานได้เองกับจอที่สอง
 
-# รัน (auto-detect จอเสมือน)
+### ขั้นที่ 2 — ติดตั้งไดรเวอร์
+
+```powershell
+# ดูว่าจะเกิดอะไรขึ้น โดยยังไม่เปลี่ยนอะไร
+.\tools\install-driver.ps1 -WhatIf
+
+# ติดตั้งจริง (ต้องรันใน PowerShell แบบ Administrator)
+.\tools\install-driver.ps1
+```
+
+สคริปต์ **จะไม่เปิด test signing ให้เอง** — มันจะรายงานสถานะแล้วหยุด เพราะการเปิด
+test signing ลดความปลอดภัยของทั้งเครื่อง (Windows จะยอมโหลดไดรเวอร์ใด ๆ ที่เซ็นด้วย
+certificate ที่อยู่ใน trust store ไม่ใช่แค่ตัวนี้) ถ้าตัดสินใจแล้วว่าจะเปิด:
+
+```powershell
+.\tools\install-driver.ps1 -EnableTestSigning    # แล้ว reboot
+```
+
+เลิกใช้เมื่อไหร่ ปิดกลับด้วย `bcdedit /set testsigning off` แล้ว reboot
+ถอนการติดตั้งทั้งหมด: `.\tools\uninstall-driver.ps1`
+
+### ขั้นที่ 3 — ใช้งาน
+
+ตั้งจอเสมือนเป็น 3840×2160 และเป็นจอหลัก ตั้งจอจริงเป็น **Extend** (ไม่ใช่ Duplicate)
+แล้ว:
+
+```powershell
 .\build\host\visual4k-host\Release\visual4k-host.exe
 
 # ปรับจูน
@@ -158,16 +197,22 @@ cmake -B build -S . && cmake --build build && ctest --test-dir build
 
 | ส่วน | สถานะ |
 |---|---|
-| แกนการ resample + เมตริก | ทดสอบแล้ว 69 tests ผ่าน |
+| แกนการ resample + เมตริก | ทดสอบแล้ว **76 tests ผ่าน** |
+| CLI ออฟไลน์ | ใช้งานได้จริง ทดสอบแล้ว |
 | C++/Python tap table parity | ตรวจสอบแล้ว (delta 3e-8) |
 | EDID ของจอเสมือน | ตรวจสอบแล้ว (checksum + timing 60.00 Hz) |
-| HLSL shaders | เขียนแล้ว **ยังไม่ได้คอมไพล์** — ต้องมี Windows + D3D |
-| คอมโพสิเตอร์ D3D11 | เขียนแล้ว **ยังไม่ได้คอมไพล์** — ต้องมี Windows SDK |
-| ไดรเวอร์ IddCx | เขียนแล้ว **ยังไม่ได้คอมไพล์** — ต้องมี WDK |
+| คอมโพสิเตอร์ D3D11 | ผ่าน type-check กับ stub headers **ยังไม่ได้ build จริง** |
+| HLSL shaders | เขียนแล้ว **ยังไม่ได้คอมไพล์** — ต้องมี D3D |
+| ไดรเวอร์ IddCx | เขียนแล้ว **ยังไม่ได้คอมไพล์** — ต้องมี WDK **ตรวจสอบน้อยที่สุด** |
 
-ส่วนที่ยังไม่ได้คอมไพล์เขียนขึ้นในสภาพแวดล้อม Linux ที่ไม่มี Windows SDK/WDK
-คาดว่าจะต้องแก้ compile error รอบแรกบ้าง ตรรกะเชิงตัวเลขที่คุณภาพของภาพขึ้นอยู่กับมัน
-ถูกแยกออกมาไว้ในส่วนที่ทดสอบได้แล้วทั้งหมด
+โค้ดฝั่ง Windows เขียนขึ้นบน Linux ที่ไม่มี Windows SDK/WDK เพื่อลด compile error
+รอบแรก โค้ดคอมโพสิเตอร์ถูก type-check กับ stub headers ที่เขียนขึ้นเอง
+(`tools/check-host-compiles.sh` — วิธีนี้จับ error ในโค้ดเราได้ แต่ไม่ยืนยันว่า
+signature ของ API จริงตรงกัน อ่าน `tools/winstub/README.md`) การตรวจนี้จับบั๊กจริง
+ไปแล้วหนึ่งตัว: `ComPtr` กำกวมใน `main.cpp`
+
+**ไดรเวอร์เป็นส่วนที่ตรวจสอบได้น้อยที่สุด** — IddCx เป็น API ที่เฉพาะทางเกินกว่าจะ
+เขียน stub ที่เชื่อถือได้ ถ้าอยากลองแค่คุณภาพของฟิลเตอร์ก่อน ใช้ขั้นที่ 0 ข้างบน
 
 ## License
 

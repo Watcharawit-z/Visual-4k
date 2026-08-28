@@ -31,7 +31,8 @@
 #include "Duplicator.h"
 #include "Renderer.h"
 
-using Microsoft::WRL::ComPtr;
+// ComPtr arrives with this: visual4k aliases Microsoft::WRL::ComPtr.
+// Naming both here would make every use of it ambiguous.
 using namespace visual4k;
 
 namespace {
