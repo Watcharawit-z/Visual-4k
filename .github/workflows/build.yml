@@ -78,7 +78,12 @@ jobs:
 
   driver:
     name: driver (Visual4kDisplay)
-    runs-on: windows-latest
+    # Pinned to the VS2022 image on purpose. windows-latest now ships Visual
+    # Studio 18, and the WDK's MSBuild integration is distributed as a VSIX
+    # built for VS2022 -- on VS18 there is nothing to install, MSBuild quietly
+    # falls back to the ordinary C++ toolset, and the build fails much later
+    # with "cannot open include file: 'wdf.h'".
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
@@ -109,33 +114,69 @@ jobs:
       - name: Install the WDK Visual Studio extension
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Continue"
+          $ErrorActionPreference = "Stop"
+
           $vsix = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Vsix" `
                       -Filter "*.vsix" -Recurse -ErrorAction SilentlyContinue |
                   Sort-Object FullName -Descending
           if (-not $vsix) {
-            Write-Host "::warning::No WDK VSIX found; listing what is present"
+            Write-Host "No WDK VSIX under Windows Kits\10\Vsix. Present:"
             Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Depth 1 |
                 Select-Object FullName
-            exit 1
+            throw "WDK VSIX not found"
           }
-          foreach ($v in $vsix) { Write-Host "found: $($v.FullName)" }
+          $vsix | ForEach-Object { Write-Host "found: $($_.FullName)" }
 
-          $installerPath = Get-ChildItem `
-              "C:\Program Files*\Microsoft Visual Studio\2022\*\Common7\IDE\VSIXInstaller.exe" |
-              Select-Object -First 1
-          Write-Host "using $($installerPath.FullName)"
-          $p = Start-Process -FilePath $installerPath.FullName `
+          # Locate VS through vswhere rather than a hardcoded year: the hosted
+          # images change edition and version without notice, and a glob that
+          # silently matches nothing is how this step failed the first time.
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          $vsPath = & $vswhere -latest -products * -property installationPath
+          if (-not $vsPath) { throw "vswhere found no Visual Studio installation" }
+
+          $installer = Join-Path $vsPath "Common7\IDE\VSIXInstaller.exe"
+          if (-not (Test-Path $installer)) { throw "VSIXInstaller not at $installer" }
+          Write-Host "VS: $vsPath"
+
+          $p = Start-Process -FilePath $installer `
                              -ArgumentList "/quiet","/admin",$vsix[0].FullName `
                              -Wait -PassThru
           Write-Host "VSIXInstaller exit code: $($p.ExitCode)"
+          # 1001 means "already installed", which is a success for our purposes.
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 1001) {
+            throw "VSIX install failed with $($p.ExitCode)"
+          }
+
+      - name: Verify the driver toolset is present
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Without this check MSBuild falls back to the ordinary C++ toolset
+          # and the failure surfaces as a missing wdf.h, which sends you
+          # looking for the WDK headers instead of the integration.
+          $toolsets = Get-ChildItem `
+              "C:\Program Files*\Microsoft Visual Studio\*\*\MSBuild\Microsoft\VC\*\Platforms\x64\PlatformToolsets" `
+              -Directory -ErrorAction SilentlyContinue
+          $toolsets | Select-Object -ExpandProperty Name -Unique |
+              ForEach-Object { Write-Host "toolset: $_" }
+          if (-not ($toolsets.Name -contains "WindowsUserModeDriver10.0")) {
+            throw "WindowsUserModeDriver10.0 toolset is missing; the WDK VSIX did not register"
+          }
 
       - name: Build the driver
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
                   /p:Configuration=Release /p:Platform=x64 `
                   /v:normal /p:SignMode=Off
+          if ($LASTEXITCODE -ne 0) { throw "driver build failed" }
+
+          $dll = Get-ChildItem driver/Visual4kDisplay/x64 -Recurse `
+                     -Filter Visual4kDisplay.dll -ErrorAction SilentlyContinue
+          if (-not $dll) { throw "build reported success but produced no DLL" }
+          Write-Host "built: $($dll[0].FullName)"
 
       - name: Stage the package
         shell: pwsh
