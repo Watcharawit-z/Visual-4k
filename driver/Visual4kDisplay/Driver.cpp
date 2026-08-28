@@ -22,10 +22,8 @@ constexpr VirtualMode kModes[] = {
 
 constexpr VirtualMode kPreferredMode = kModes[0];
 
-NTSTATUS CreateMonitor(WDFDEVICE device)
+NTSTATUS CreateMonitor(DeviceContext* ctx)
 {
-    auto* ctx = GetDeviceContext(device);
-
     IDDCX_MONITOR_INFO info = {};
     info.Size = sizeof(info);
     info.MonitorType = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL;
@@ -42,8 +40,11 @@ NTSTATUS CreateMonitor(WDFDEVICE device)
     info.MonitorDescription.DataSize = static_cast<UINT>(edid.size());
     info.MonitorDescription.pData = const_cast<uint8_t*>(edid.data());
 
+    WDF_OBJECT_ATTRIBUTES monitorAttributes;
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&monitorAttributes, ContextWrapper);
+
     IDARG_IN_MONITORCREATE createIn = {};
-    createIn.ObjectAttributes = WDF_NO_OBJECT_ATTRIBUTES;
+    createIn.ObjectAttributes = &monitorAttributes;
     createIn.pMonitorInfo = &info;
 
     IDARG_OUT_MONITORCREATE createOut = {};
@@ -52,6 +53,7 @@ NTSTATUS CreateMonitor(WDFDEVICE device)
         return status;
 
     ctx->monitor = createOut.MonitorObject;
+    GetContextWrapper(createOut.MonitorObject)->device = ctx;
 
     IDARG_OUT_MONITORARRIVAL arrivalOut = {};
     return IddCxMonitorArrival(ctx->monitor, &arrivalOut);
@@ -67,8 +69,7 @@ NTSTATUS EvtAdapterInitFinished(IDDCX_ADAPTER adapter,
     if (!NT_SUCCESS(args->AdapterInitStatus))
         return args->AdapterInitStatus;
 
-    auto device = static_cast<WDFDEVICE>(IddCxAdapterGetContextObject(adapter));
-    return CreateMonitor(device);
+    return CreateMonitor(GetContextWrapper(adapter)->device);
 }
 
 NTSTATUS EvtParseMonitorDescription(
@@ -161,8 +162,7 @@ NTSTATUS EvtMonitorQueryTargetModes(
 NTSTATUS EvtMonitorAssignSwapChain(IDDCX_MONITOR monitor,
                                    const IDARG_IN_SETSWAPCHAIN* in)
 {
-    auto device = static_cast<WDFDEVICE>(IddCxMonitorGetContextObject(monitor));
-    auto* ctx = GetDeviceContext(device);
+    auto* ctx = GetContextWrapper(monitor)->device;
 
     // Windows may reassign without unassigning first; dropping the old
     // processor here is what stops the two racing over the same swap chain.
@@ -175,8 +175,7 @@ NTSTATUS EvtMonitorAssignSwapChain(IDDCX_MONITOR monitor,
 
 NTSTATUS EvtMonitorUnassignSwapChain(IDDCX_MONITOR monitor)
 {
-    auto device = static_cast<WDFDEVICE>(IddCxMonitorGetContextObject(monitor));
-    GetDeviceContext(device)->processor.reset();
+    GetContextWrapper(monitor)->device->processor.reset();
     return STATUS_SUCCESS;
 }
 
@@ -216,10 +215,13 @@ NTSTATUS EvtDevicePrepareHardware(WDFDEVICE device,
     caps.EndPointDiagnostics.pEndPointManufacturerName = L"Visual-4k";
     caps.EndPointDiagnostics.pEndPointModelName = L"Supersampling Source";
 
+    WDF_OBJECT_ATTRIBUTES adapterAttributes;
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&adapterAttributes, ContextWrapper);
+
     IDARG_IN_ADAPTER_INIT init = {};
     init.WdfDevice = device;
     init.pCaps = &caps;
-    init.ObjectAttributes = WDF_NO_OBJECT_ATTRIBUTES;
+    init.ObjectAttributes = &adapterAttributes;
 
     IDARG_OUT_ADAPTER_INIT initOut = {};
     NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);
@@ -227,7 +229,13 @@ NTSTATUS EvtDevicePrepareHardware(WDFDEVICE device,
         return status;
 
     ctx->adapter = initOut.AdapterObject;
+    GetContextWrapper(initOut.AdapterObject)->device = ctx;
     return STATUS_SUCCESS;
+}
+
+void EvtDeviceContextCleanup(WDFOBJECT object)
+{
+    GetDeviceContext(static_cast<WDFDEVICE>(object))->~DeviceContext();
 }
 
 NTSTATUS EvtDeviceAdd(WDFDRIVER /*driver*/, PWDFDEVICE_INIT deviceInit)
@@ -254,11 +262,9 @@ NTSTATUS EvtDeviceAdd(WDFDRIVER /*driver*/, PWDFDEVICE_INIT deviceInit)
 
     WDF_OBJECT_ATTRIBUTES attributes;
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, DeviceContext);
-    // The context holds a std::unique_ptr, so it needs its constructor and
-    // destructor to actually run -- WDF will not do that for us.
-    attributes.EvtCleanupCallback = [](WDFOBJECT object) {
-        GetDeviceContext(static_cast<WDFDEVICE>(object))->~DeviceContext();
-    };
+    // The context holds a std::unique_ptr, so its constructor and destructor
+    // have to actually run -- WDF only zeroes the memory.
+    attributes.EvtCleanupCallback = EvtDeviceContextCleanup;
 
     WDFDEVICE device = nullptr;
     status = WdfDeviceCreate(&deviceInit, &attributes, &device);

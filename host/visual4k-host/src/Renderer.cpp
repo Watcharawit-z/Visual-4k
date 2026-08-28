@@ -275,14 +275,16 @@ HRESULT Renderer::Render(ID3D11Texture2D* source, ID3D11Texture2D* target)
     HRESULT hr = Resize(srcDesc.Width, srcDesc.Height, dstDesc.Width, dstDesc.Height);
     if (FAILED(hr)) return hr;
 
-    ComPtr<ID3D11ShaderResourceView> sourceSrv;
-    hr = device_->CreateShaderResourceView(source, nullptr,
-                                           sourceSrv.GetAddressOf());
-    if (FAILED(hr)) return hr;
+    if (source != cachedSource_) {
+        hr = device_->CreateShaderResourceView(
+            source, nullptr, sourceSrv_.ReleaseAndGetAddressOf());
+        if (FAILED(hr)) return hr;
+        cachedSource_ = source;
+    }
 
     // Horizontal first: it is the axis with the larger reduction on every
     // 16:9 source, so it shrinks the working set before the vertical pass runs.
-    hr = RunResolvePass(0, sourceSrv.Get(), intermediateHUav_.Get(),
+    hr = RunResolvePass(0, sourceSrv_.Get(), intermediateHUav_.Get(),
                         srcWidth_, srcHeight_, dstWidth_, srcHeight_,
                         hFirstTapSrv_.Get(), hWeightsSrv_.Get(),
                         horizontalTaps_.tapCount);
@@ -290,15 +292,17 @@ HRESULT Renderer::Render(ID3D11Texture2D* source, ID3D11Texture2D* target)
 
     const bool sharpen = settings_.sharpnessStops >= 0.0f;
 
-    ComPtr<ID3D11UnorderedAccessView> targetUav;
-    hr = device_->CreateUnorderedAccessView(target, nullptr,
-                                            targetUav.GetAddressOf());
-    if (FAILED(hr)) return hr;
+    if (target != cachedTarget_) {
+        hr = device_->CreateUnorderedAccessView(
+            target, nullptr, targetUav_.ReleaseAndGetAddressOf());
+        if (FAILED(hr)) return hr;
+        cachedTarget_ = target;
+    }
 
     // With sharpening off the vertical pass can write straight to the target,
     // saving a full-resolution round trip through memory.
     hr = RunResolvePass(1, intermediateHSrv_.Get(),
-                        sharpen ? resolvedUav_.Get() : targetUav.Get(),
+                        sharpen ? resolvedUav_.Get() : targetUav_.Get(),
                         dstWidth_, srcHeight_, dstWidth_, dstHeight_,
                         vFirstTapSrv_.Get(), vWeightsSrv_.Get(),
                         verticalTaps_.tapCount);
@@ -322,7 +326,7 @@ HRESULT Renderer::Render(ID3D11Texture2D* source, ID3D11Texture2D* target)
 
     ID3D11ShaderResourceView* srvs[1] = {resolvedSrv_.Get()};
     ID3D11Buffer* cbs[1] = {sharpenCb_.Get()};
-    ID3D11UnorderedAccessView* uavs[1] = {targetUav.Get()};
+    ID3D11UnorderedAccessView* uavs[1] = {targetUav_.Get()};
 
     context_->CSSetShader(sharpenCs_.Get(), nullptr, 0);
     context_->CSSetConstantBuffers(0, 1, cbs);

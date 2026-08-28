@@ -67,12 +67,22 @@ private:
 
 // Per-adapter state, attached to the WDFDEVICE via a WDF context.
 struct DeviceContext {
-    IDDCX_ADAPTER adapter;
-    IDDCX_MONITOR monitor;
+    IDDCX_ADAPTER adapter = nullptr;
+    IDDCX_MONITOR monitor = nullptr;
     std::unique_ptr<SwapChainProcessor> processor;
 };
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DeviceContext, GetDeviceContext);
+
+// IddCx hands its callbacks an IDDCX_ADAPTER or IDDCX_MONITOR, never the
+// WDFDEVICE, and offers no API to walk back to the device. The documented way
+// across is to attach a context to those objects at creation time and read it
+// back in the callback; this wrapper is that context.
+struct ContextWrapper {
+    DeviceContext* device;
+};
+
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(ContextWrapper, GetContextWrapper);
 
 }  // namespace visual4k
 

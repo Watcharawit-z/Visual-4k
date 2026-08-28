@@ -134,6 +134,14 @@ private:
     ComPtr<ID3D11ShaderResourceView> resolvedSrv_;
     ComPtr<ID3D11UnorderedAccessView> resolvedUav_;
 
+    // Desktop Duplication and the swap chain both hand back the same few
+    // textures frame after frame, so the views are cached on the texture
+    // pointer rather than recreated in the hot path.
+    ComPtr<ID3D11ShaderResourceView> sourceSrv_;
+    ID3D11Texture2D* cachedSource_ = nullptr;
+    ComPtr<ID3D11UnorderedAccessView> targetUav_;
+    ID3D11Texture2D* cachedTarget_ = nullptr;
+
     ComPtr<ID3D11ShaderResourceView> hFirstTapSrv_;
     ComPtr<ID3D11ShaderResourceView> hWeightsSrv_;
     ComPtr<ID3D11ShaderResourceView> vFirstTapSrv_;

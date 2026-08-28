@@ -23,6 +23,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cwchar>
+#include <exception>
 #include <string>
 #include <vector>
 
