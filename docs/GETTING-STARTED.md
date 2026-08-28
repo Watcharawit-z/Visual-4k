@@ -24,7 +24,9 @@
 ไว้และผูกกับ TPM การแก้ boot config อาจทำให้ครั้งต่อไปที่บูต Windows ขอ
 **BitLocker recovery key** ถ้าไม่มีคีย์ = เข้าเครื่องไม่ได้ และข้อมูลหายถาวร
 
-**ก่อนทำอะไรทั้งสิ้น ตรวจสอบ:**
+**ก่อนทำอะไรทั้งสิ้น ตรวจสอบ** — คำสั่งนี้ต้องรันใน **PowerShell แบบ Administrator**
+(คลิกขวาที่ Start → Terminal (Admin)) ถ้ารันแบบธรรมดาจะได้
+`ERROR: An attempt to access a required resource was denied.`
 
 ```powershell
 manage-bde -status C:
@@ -53,6 +55,9 @@ Confirm-SecureBootUEFI
 ```
 
 `True` = เปิดอยู่ ต้องปิดใน UEFI (กด Del/F2/F12 ตอนบูต ต่างกันตามยี่ห้อ)
+
+คำสั่งนี้ก็ต้องรันแบบ Administrator เช่นกัน ไม่งั้นจะได้
+`Unable to set proper privileges. Access was denied.`
 
 ### 3. test signing ลดความปลอดภัยของทั้งเครื่อง
 
