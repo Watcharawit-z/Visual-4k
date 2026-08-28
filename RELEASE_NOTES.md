@@ -1,63 +1,60 @@
-The compositor ran on real hardware for the first time, and stretched the
-image. This release fixes that.
+Preparation for the first driver install. The compositor had a bug that would
+have made that install look like a total failure, and it is fixed here.
 
-## What this release fixes
+## The bug you would have hit
 
-A 3440x1440 desktop resolved onto a 2560x1440 panel came out visibly squeezed.
-The resolve maps each axis independently, so it was compressing horizontally by
-1.34x and not at all vertically: every proportion in the image was wrong.
+The output window was created at (0,0) sized to the primary display, so it
+always landed on the primary.
 
-The compositor now fits the source inside the panel and paints black bars
-around it. `--stretch` keeps the old behaviour, which is correct only when the
-two aspect ratios already match.
+That is exactly backwards for the setup the driver exists to create. The
+virtual 4K display has to be the *primary* one, because the primary is where
+Windows lays out windows, text and games -- laying that out at 4K is the whole
+point of the driver. So the compositor would have drawn the resolved image back
+onto the virtual display it had just captured, and left the physical panel
+dark. The natural conclusion would have been "the driver does not work".
 
-**This does not change the driver path.** A 4K virtual display on a 1440p panel
-is 16:9 onto 16:9, so it still fills the screen with no bars. There is a test
-asserting exactly that.
+The compositor now picks a panel that is not the source, and positions the
+window at that display's own origin instead of at (0,0) -- which is not where a
+monitor to the left of or above the primary lives.
 
-## What the first real run established
+Two new ways to be explicit, which matter as soon as a third display is
+attached:
 
-Seeing a squeezed image rather than a black screen proved several things that
-had never been exercised:
+    visual4k-host.exe --source \\.\DISPLAYn --output \\.\DISPLAYm
 
-- The HLSL compiles on a real GPU. The compositor builds it at runtime, so
-  until now no shader compiler had ever seen it.
-- Desktop Duplication acquires frames, all three compute passes run, and the
-  swap chain presents.
-- `visual4k-host --list-displays` enumerates correctly, and `edid_selftest`
-  passes every check on Windows.
+`--list-displays` now prints each display's position alongside its size, so
+those names can be read straight off it.
+
+With nothing specified, `--source` now defaults to the primary display rather
+than to the first one that happens to be capturable.
+
+## Also fixed
+
+The mouse pointer was clipped against the whole panel rather than against the
+area the desktop actually occupies, so with letterboxing a cursor resting on
+the source's bottom edge had its lower half drawn onto the black bar. No effect
+on the driver path, where the desktop fills the panel.
 
 ## Still not established
 
-**The driver has never been installed.** It compiles and links, and its INF has
-been corrected by inspection, but nothing has loaded it and no virtual display
-has appeared.
+**The driver has never been installed.** It compiles, links, and is signed by
+the build, and its INF has been corrected by inspection -- but nothing has ever
+loaded it, and no virtual display has ever appeared. Everything about the
+install is untested in the strict sense.
 
-**Windows will not load it unless test signing is enabled** -- a boot setting
-that lowers the machine's security while on. On a BitLocker machine, changing
-boot settings can trigger a recovery-key prompt; have your key first. Both
-`manage-bde -status C:` and `Confirm-SecureBootUEFI` need an elevated
-PowerShell, which the guide now says.
+**Windows will not load it unless test signing is enabled**, a boot setting
+that lowers the machine's security while it is on. Turn it off when finished:
 
-## Installing
+    bcdedit /set testsigning off
 
-```powershell
-# Extract, then open PowerShell in that folder
-Get-ChildItem -Recurse | Unblock-File
+Before touching boot settings, check `manage-bde -status C:` (a BitLocker
+machine can demand a recovery key on the next boot) and `Confirm-SecureBootUEFI`
+(Secure Boot makes the test-signing flag succeed silently and do nothing). Both
+need an elevated PowerShell; the guide now explains how to get one and how to
+confirm you have one.
 
-.\visual4k-host.exe --list-displays
-.\edid_selftest.exe
+## Verified
 
-# Then, in an ELEVATED PowerShell:
-.\install-driver.ps1 -WhatIf
-.\install-driver.ps1
-```
-
-With a second display larger than your main one, the compositor can be tried
-without the driver at all:
-
-```powershell
-.\visual4k-host.exe --source \\.\DISPLAY1
-```
-
-Quit from anywhere with Ctrl+Alt+F12.
+78 reference tests, 4 self-tests (tap-table parity against the Python
+reference, EDID, cursor decode, aspect fit), and a type-check of every host
+source. All green.
