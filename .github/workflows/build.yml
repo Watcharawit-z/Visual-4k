@@ -51,6 +51,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Not optional decoration: this is what lets the tap table parity check
+      # run against the binary that is about to be published, rather than
+      # being skipped on the one platform that ships it.
+      - name: Install numpy for the parity check
+        run: pip install numpy
+
       - name: Configure
         run: cmake -B build -S . -A x64
 

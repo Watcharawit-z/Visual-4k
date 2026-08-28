@@ -12,9 +12,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(__file__).resolve().parents[1]
+
+try:
+    import numpy as np
+except ImportError:
+    # Exit 77 is CTest's skip code. Without this guard the check reports a
+    # hard failure on any machine that simply has not installed numpy, which
+    # is indistinguishable from the coefficients actually disagreeing.
+    print("numpy is not installed; skipping the C++/Python tap table check")
+    raise SystemExit(77)
+
 sys.path.insert(0, str(ROOT / "reference"))
 
 from visual4k_ref.kernels import kernel_by_name          # noqa: E402

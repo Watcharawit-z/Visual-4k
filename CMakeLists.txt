@@ -30,12 +30,21 @@ target_include_directories(edid_selftest PRIVATE driver/Visual4kDisplay)
 
 add_test(NAME edid COMMAND edid_selftest)
 add_test(NAME cursor COMMAND cursor_selftest)
-add_test(NAME taptable_parity
-         COMMAND ${CMAKE_COMMAND} -E env
-                 python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/compare_taptable.py)
-set_tests_properties(taptable_parity PROPERTIES
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    SKIP_RETURN_CODE 77)
+
+# The interpreter is called python3 on Unix and python.exe on Windows, so let
+# CMake find it rather than guessing. The parity check itself exits 77 when
+# numpy is missing, which CTest reports as a skip.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME taptable_parity
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/tools/compare_taptable.py)
+    set_tests_properties(taptable_parity PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        SKIP_RETURN_CODE 77)
+else()
+    message(STATUS "No Python interpreter found; skipping the tap table parity test")
+endif()
 
 if(WIN32)
     add_subdirectory(host/visual4k-host)
