@@ -13,6 +13,13 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: >-
+          Tag to create and publish a release for, e.g. v0.1.0.
+          Leave empty to build without releasing.
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -340,7 +347,10 @@ jobs:
     name: release package
     runs-on: windows-latest
     needs: [reference, compositor, driver]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Two ways in: a pushed tag, or a manual run that names one. The manual
+    # path exists because pushing a tag is not always available to whoever is
+    # driving the release, and action-gh-release will create the tag itself.
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
     steps:
       - uses: actions/checkout@v4
 
@@ -350,17 +360,31 @@ jobs:
 
       - name: Assemble the release zip
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
+          $ErrorActionPreference = "Stop"
           $root = "Visual-4k"
           New-Item -ItemType Directory -Force -Path $root | Out-Null
           Copy-Item -Recurse staging/visual4k-host/* $root
           New-Item -ItemType Directory -Force -Path "$root/driver" | Out-Null
           Copy-Item -Recurse staging/Visual4kDisplay/* "$root/driver"
           Copy-Item tools/install-driver.ps1, tools/uninstall-driver.ps1 $root
+          Copy-Item tools/Install-Visual4k.ps1 $root
           Copy-Item docs/GETTING-STARTED.md, README.md, LICENSE $root
-          Compress-Archive -Path $root -DestinationPath "Visual-4k-$($env:GITHUB_REF_NAME).zip"
+
+          # The compositor renders black without these, so a zip missing them
+          # would be worse than no zip at all.
+          if (-not (Test-Path "$root/visual4k-host.exe")) { throw "compositor missing" }
+          if (-not (Test-Path "$root/shaders")) { throw "shaders missing" }
+          if (-not (Get-ChildItem "$root/driver" -Filter *.dll)) { throw "driver DLL missing" }
+
+          Compress-Archive -Path $root -DestinationPath "Visual-4k-$env:RELEASE_TAG.zip"
+          Get-ChildItem -Recurse $root | Select-Object FullName
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: Visual-4k ${{ inputs.release_tag || github.ref_name }}
+          body_path: RELEASE_NOTES.md
           files: Visual-4k-*.zip
-          generate_release_notes: true
