@@ -156,8 +156,11 @@ jobs:
           if (-not (Test-Path $installer)) { throw "VSIXInstaller not at $installer" }
           Write-Host "VS: $vsPath"
 
+          # /logFile captures the real reason behind VSIXInstaller's numeric
+          # exit codes, which on their own cannot be acted on.
+          $log = "$env:RUNNER_TEMP\vsix.log"
           $p = Start-Process -FilePath $installer `
-                             -ArgumentList "/quiet","/admin",$vsix.FullName `
+                             -ArgumentList "/quiet","/admin","/logFile:$log",$vsix.FullName `
                              -Wait -PassThru
           # Deliberately not fatal. VSIXInstaller's exit codes do not
           # distinguish "failed" from "this is already installed", and the
@@ -166,6 +169,11 @@ jobs:
           # next step checks the thing we actually care about -- whether the
           # toolset is registered -- and that is the authority.
           Write-Host "VSIXInstaller exit code: $($p.ExitCode) (informational)"
+          Get-ChildItem "$env:RUNNER_TEMP" -Filter "vsix*.log" -ErrorAction SilentlyContinue |
+              ForEach-Object {
+                  Write-Host "--- $($_.Name) ---"
+                  Get-Content $_.FullName -Tail 40
+              }
 
 
       - name: Verify the driver toolset is present
@@ -177,14 +185,26 @@ jobs:
           # ordinary C++ toolset and the failure surfaces much later as a
           # missing wdf.h, which sends you looking for the WDK headers
           # instead of the integration.
+          # The trailing \* matters. Without it PowerShell returns the
+          # PlatformToolsets directory itself rather than the toolsets inside
+          # it, and the check reports every toolset as missing.
           $toolsets = Get-ChildItem `
-              "C:\Program Files*\Microsoft Visual Studio\*\*\MSBuild\Microsoft\VC\*\Platforms\x64\PlatformToolsets" `
+              "C:\Program Files*\Microsoft Visual Studio\*\*\MSBuild\Microsoft\VC\*\Platforms\x64\PlatformToolsets\*" `
               -Directory -ErrorAction SilentlyContinue
-          $toolsets | Select-Object -ExpandProperty Name -Unique |
-              ForEach-Object { Write-Host "toolset: $_" }
-          if (-not ($toolsets.Name -contains "WindowsUserModeDriver10.0")) {
-            throw "WindowsUserModeDriver10.0 toolset is missing; the WDK VSIX did not register"
+
+          $names = $toolsets | Select-Object -ExpandProperty Name -Unique | Sort-Object
+          Write-Host "registered x64 toolsets:"
+          $names | ForEach-Object { Write-Host "  $_" }
+
+          if ($names -notcontains "WindowsUserModeDriver10.0") {
+            Write-Host ""
+            Write-Host "WDK MSBuild files present on disk:"
+            Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\build" -Directory `
+                -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            throw "WindowsUserModeDriver10.0 toolset is not registered with MSBuild"
           }
+          Write-Host ""
+          Write-Host "WindowsUserModeDriver10.0 is registered."
 
       - name: Build the driver
         shell: pwsh
