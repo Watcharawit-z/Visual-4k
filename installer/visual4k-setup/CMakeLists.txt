@@ -33,7 +33,12 @@ if(MSVC)
     target_compile_options(visual4k-setup PRIVATE /W4 /permissive-)
     # Embedding the manifest is what makes a double-click raise the UAC prompt.
     # Without it the program starts unelevated and fails at its first step.
+    #
+    # The elevation level goes on the link line rather than in the manifest
+    # file: the linker generates its own trustInfo snippet, and mt.exe fails
+    # the build rather than choose between two that disagree.
     target_link_options(visual4k-setup PRIVATE
         "/MANIFEST:EMBED"
+        "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
         "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/visual4k-setup.manifest")
 endif()
