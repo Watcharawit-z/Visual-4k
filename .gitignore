@@ -1,0 +1,31 @@
+# Build output
+build/
+bin/
+obj/
+x64/
+Debug/
+Release/
+*.user
+*.aps
+*.suo
+.vs/
+
+# Driver build artifacts
+*.cer
+*.cat
+*.pdb
+*.ilk
+*.sys.map
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local captures and comparison renders
+*.png
+*.bmp
+*.dds
+!docs/img/*.png
