@@ -55,6 +55,12 @@ jobs:
       # A syntax error in an install script only surfaces when a user runs it,
       # by which point they have already downloaded a release. pwsh parses on
       # Linux, so this costs nothing.
+      # Same reasoning as the PowerShell parse below: a malformed XML file
+      # fails on a Windows runner minutes later, with an error that names the
+      # file and not the line.
+      - name: Parse the XML files
+        run: python3 tools/check-xml-comments.py
+
       - name: Parse the PowerShell scripts
         shell: pwsh
         run: |

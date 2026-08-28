@@ -4,15 +4,19 @@
                     processorArchitecture="amd64"/>
   <description>Visual-4k setup</description>
 
-  <!-- The requested execution level is deliberately NOT here. Everything this
-       program does needs administrator rights -- writing to the machine
-       certificate stores, changing a boot setting, creating a device -- so the
-       level is requireAdministrator, but the linker emits a trustInfo snippet
-       of its own and mt.exe refuses to merge two that disagree:
-           manifest authoring error c1010001: Values of attribute "level" not
-           equal in different manifest snippets.
-       So the level is set once, on the link line via /MANIFESTUAC, and this
-       file supplies only what the linker does not generate. -->
+  <!-- The requested execution level is deliberately NOT here.
+
+       Everything this program does needs administrator rights: writing to the
+       machine certificate stores, changing a boot setting, creating a device.
+       So the level is requireAdministrator. But the linker emits a trustInfo
+       snippet of its own, and mt.exe fails the build rather than choose
+       between two that disagree (manifest authoring error c1010001). The level
+       is therefore set once, on the link line via /MANIFESTUAC, and this file
+       supplies only what the linker does not generate.
+
+       Note for anyone editing these comments: XML forbids a double hyphen
+       inside a comment, and mt.exe reports that as a parse failure naming the
+       whole file rather than the line. tools/check-xml-comments.py guards it. -->
 
   <!-- Without declaring the OS versions it supports, Windows reports itself as
        version 6.2 to this process for compatibility. Nothing here reads the
