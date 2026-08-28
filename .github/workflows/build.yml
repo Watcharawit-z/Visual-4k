@@ -258,6 +258,27 @@ jobs:
                       Where-Object { $_.FullName -match '\\x64\\' } |
                       Sort-Object FullName -Descending | Select-Object -First 1
 
+          # The kit installs IddCx under um\iddcx\MAJOR.MINOR, and its headers
+          # hard-error without matching version macros, so read the version off
+          # the directory rather than pinning one that may not be installed.
+          $iddcxMajor = "1"
+          $iddcxMinor = "9"
+          $iddcxVersionDir = Get-ChildItem "$kit\Include\*\um\iddcx" -Directory `
+                                 -ErrorAction SilentlyContinue |
+                             Where-Object { $_.Name -match '^(\d+)\.(\d+)$' } |
+                             Sort-Object {
+                                 $p = $_.Name -split '\.'
+                                 [int]$p[0] * 1000 + [int]$p[1]
+                             } -Descending | Select-Object -First 1
+          if ($iddcxVersionDir) {
+            $parts = $iddcxVersionDir.Name -split '\.'
+            $iddcxMajor = $parts[0]
+            $iddcxMinor = $parts[1]
+            Write-Host "IddCx version: $iddcxMajor.$iddcxMinor ($($iddcxVersionDir.FullName))"
+          } else {
+            Write-Host "::warning::no versioned IddCx directory found; assuming $iddcxMajor.$iddcxMinor"
+          }
+
           if ($iddcxHeader) {
             Write-Host "iddcx.h: $($iddcxHeader.FullName)"
             $iddcxInclude = $iddcxHeader.DirectoryName
@@ -279,6 +300,8 @@ jobs:
                   /p:Visual4kUmdfVersion=2.$minor `
                   /p:Visual4kIddCxInclude=$iddcxInclude `
                   /p:Visual4kIddCxLib=$iddcxLibDir `
+                  /p:Visual4kIddCxMajor=$iddcxMajor `
+                  /p:Visual4kIddCxMinor=$iddcxMinor `
                   /v:normal /p:SignMode=Off
           if ($LASTEXITCODE -ne 0) { throw "driver build failed" }
 

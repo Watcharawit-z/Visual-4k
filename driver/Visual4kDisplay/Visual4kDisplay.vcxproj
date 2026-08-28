@@ -80,6 +80,14 @@
     <Visual4kWdfInclude>$(Visual4kKitRoot)Include\wdf\umdf\$(Visual4kUmdfVersion)</Visual4kWdfInclude>
     <Visual4kWdfLib>$(Visual4kKitRoot)Lib\wdf\umdf\x64\$(Visual4kUmdfVersion)</Visual4kWdfLib>
 
+    <!-- IddCx is versioned the same way WDF is, and its headers refuse to
+         compile without the version macros: IddCxFuncEnum.h stops with
+         "IDDCX_VERSION_MAJOR is not defined" rather than picking a default.
+         The kit installs them under um\iddcx\MAJOR.MINOR, so CI reads the
+         version off that directory and passes it. -->
+    <Visual4kIddCxMajor Condition="'$(Visual4kIddCxMajor)' == ''">1</Visual4kIddCxMajor>
+    <Visual4kIddCxMinor Condition="'$(Visual4kIddCxMinor)' == ''">9</Visual4kIddCxMinor>
+
     <!-- The INF is signed together with the binary; without a catalog the
          package installs but the driver refuses to load with code 52. -->
     <EnableInf2cat>true</EnableInf2cat>
@@ -103,7 +111,7 @@
         $(Visual4kWdfInclude);$(Visual4kIddCxInclude);%(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
       <PreprocessorDefinitions>
-        _UNICODE;UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;UMDF_USING_NTSTATUS;UMDF_VERSION_MAJOR=$(UmdfVersionMajor);UMDF_VERSION_MINOR=$(UmdfVersionMinor);%(PreprocessorDefinitions)
+        _UNICODE;UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;UMDF_USING_NTSTATUS;UMDF_VERSION_MAJOR=$(UmdfVersionMajor);UMDF_VERSION_MINOR=$(UmdfVersionMinor);IDDCX_VERSION_MAJOR=$(Visual4kIddCxMajor);IDDCX_VERSION_MINOR=$(Visual4kIddCxMinor);%(PreprocessorDefinitions)
       </PreprocessorDefinitions>
       <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebugDLL</RuntimeLibrary>
       <RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreadedDLL</RuntimeLibrary>
