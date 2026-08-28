@@ -12,6 +12,10 @@
 //     --shaders <dir>          shader directory (default: .\shaders)
 //     --vsync <0|1>            default 1
 //     --no-cursor              do not composite the mouse pointer
+//     --stretch                fill the panel instead of preserving the
+//                              source's aspect ratio (letterboxing is the
+//                              default; stretching only looks right when the
+//                              two aspect ratios already match)
 //
 // Quit with Ctrl+Alt+F12 from anywhere, or Esc while the window has focus.
 // The global hotkey matters more than it sounds: once you click into the
@@ -138,6 +142,8 @@ bool ParseOptions(int argc, wchar_t** argv, Options* opt)
             const wchar_t* v = next(L"--sharpness");
             if (!v) return false;
             opt->renderer.sharpnessStops = wcstof(v, nullptr);
+        } else if (arg == L"--stretch") {
+            opt->renderer.preserveAspect = false;
         } else if (arg == L"--no-cursor") {
             opt->drawCursor = false;
         } else if (arg == L"--denoise") {
@@ -294,6 +300,9 @@ int wmain(int argc, wchar_t** argv)
                  panelW, panelH, KernelName(opt.renderer.kernel),
                  opt.renderer.sharpnessStops,
                  opt.drawCursor ? L"on" : L"off");
+    std::wprintf(L"aspect: %ls\n",
+                 opt.renderer.preserveAspect ? L"preserved (letterboxed if needed)"
+                                             : L"stretched to fill");
     std::wprintf(L"quit  : Ctrl+Alt+F12 (or Esc while focused)\n");
 
     ComPtr<ID3D11Texture2D> backBuffer;

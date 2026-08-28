@@ -100,3 +100,20 @@ def test_cursor_shape_decoder(tmp_path_factory):
         check=True, capture_output=True)
     result = subprocess.run([str(out)], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout
+
+
+def test_aspect_fit(tmp_path_factory):
+    """Where the resolved image lands on the panel.
+
+    A source whose aspect ratio differs from the panel's has to be
+    letterboxed; stretching it is what made a 3440x1440 desktop come out
+    horizontally squeezed on a 2560x1440 monitor.
+    """
+    out = tmp_path_factory.mktemp("fit") / "fit_selftest"
+    subprocess.run(
+        [CXX, "-O2", "-std=c++17", "-I", str(ROOT / "host/visual4k-host/src"),
+         str(ROOT / "tools/fit_selftest.cpp"),
+         str(ROOT / "host/visual4k-host/src/TapTable.cpp"), "-o", str(out)],
+        check=True, capture_output=True)
+    result = subprocess.run([str(out)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout

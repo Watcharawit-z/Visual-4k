@@ -22,6 +22,11 @@ cbuffer ResolveConstants : register(b0)
     uint  gAxis;         // 0 = horizontal, 1 = vertical
     uint  gLinearize;    // 1 = decode sRGB before averaging, encode after
     uint  gPad;
+    // Where in the output this pass's (0,0) lands. Non-zero only on the final
+    // pass when the source is being letterboxed into a differently-shaped
+    // panel; the intermediate always starts at the origin.
+    int2  gOutputOffset;
+    uint2 gPad2;
 };
 
 // gFirstTap[d] is the source index of tap 0 for destination pixel d.
@@ -71,5 +76,5 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     if (gLinearize != 0 && gAxis == 1)
         acc = LinearToSrgb(acc);
 
-    gOutput[tid.xy] = float4(acc, alpha);
+    gOutput[uint2(int2(tid.xy) + gOutputOffset)] = float4(acc, alpha);
 }

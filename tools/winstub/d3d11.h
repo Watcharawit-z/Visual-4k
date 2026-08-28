@@ -115,6 +115,8 @@ struct ID3D11DeviceContext : public ID3D11DeviceChild {
         UINT, UINT, ID3D11UnorderedAccessView* const*, const UINT*) = 0;
     virtual void STDMETHODCALLTYPE CSSetSamplers(
         UINT, UINT, ID3D11SamplerState* const*) = 0;
+    virtual void STDMETHODCALLTYPE ClearUnorderedAccessViewFloat(
+        ID3D11UnorderedAccessView*, const float[4]) = 0;
     virtual void STDMETHODCALLTYPE Dispatch(UINT, UINT, UINT) = 0;
 };
 

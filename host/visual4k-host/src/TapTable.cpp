@@ -111,6 +111,38 @@ double DsrSmoothnessToSigma(double smoothnessPercent)
     return 0.25 + 0.75 * s;
 }
 
+FitRect FitPreservingAspect(uint32_t srcWidth, uint32_t srcHeight,
+                            uint32_t dstWidth, uint32_t dstHeight)
+{
+    FitRect fit;
+    if (srcWidth == 0 || srcHeight == 0 || dstWidth == 0 || dstHeight == 0)
+        return fit;
+
+    // Compare aspect ratios by cross-multiplying rather than dividing, in
+    // 64-bit: 3840 * 2160 already exceeds what a signed 32-bit multiply can
+    // hold on the way to the comparison.
+    const uint64_t srcAspect = static_cast<uint64_t>(srcWidth) * dstHeight;
+    const uint64_t dstAspect = static_cast<uint64_t>(dstWidth) * srcHeight;
+
+    if (srcAspect > dstAspect) {
+        // Source is proportionally wider: fill the width, bars top and bottom.
+        fit.width = dstWidth;
+        fit.height = static_cast<uint32_t>(
+            (static_cast<uint64_t>(dstWidth) * srcHeight + srcWidth / 2) / srcWidth);
+    } else {
+        // Source is proportionally taller, or the ratios match exactly.
+        fit.height = dstHeight;
+        fit.width = static_cast<uint32_t>(
+            (static_cast<uint64_t>(dstHeight) * srcWidth + srcHeight / 2) / srcHeight);
+    }
+
+    fit.width = std::clamp<uint32_t>(fit.width, 1, dstWidth);
+    fit.height = std::clamp<uint32_t>(fit.height, 1, dstHeight);
+    fit.x = static_cast<int32_t>((dstWidth - fit.width) / 2);
+    fit.y = static_cast<int32_t>((dstHeight - fit.height) / 2);
+    return fit;
+}
+
 TapTable BuildTapTable(uint32_t srcLength, uint32_t dstLength, Kernel kernel,
                        double gaussianSigma)
 {

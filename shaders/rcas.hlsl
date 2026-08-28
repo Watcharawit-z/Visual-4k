@@ -16,6 +16,10 @@ cbuffer SharpenConstants : register(b0)
     uint2 gSize;
     float gSharpness;   // exp2(-stops); 1.0 is maximum, 0.5 is one stop down
     uint  gDenoise;     // 1 = enable FSR's noise-aware attenuation
+    // Where the sharpened image lands on the panel. Non-zero when the source
+    // is letterboxed; the bars around it are cleared before this pass runs.
+    int2  gOutputOffset;
+    uint2 gPad;
 };
 
 Texture2D<float4>   gSource : register(t0);
@@ -80,5 +84,5 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     }
 
     const float3 rgb = saturate((lobe * (b + d + f + h) + e) / (4.0f * lobe + 1.0f));
-    gOutput[tid.xy] = float4(rgb, eFull.a);
+    gOutput[uint2(int2(tid.xy) + gOutputOffset)] = float4(rgb, eFull.a);
 }

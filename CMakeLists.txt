@@ -23,6 +23,11 @@ add_executable(cursor_selftest
     host/visual4k-host/src/CursorDecoder.cpp)
 target_include_directories(cursor_selftest PRIVATE host/visual4k-host/src)
 
+add_executable(fit_selftest
+    tools/fit_selftest.cpp
+    host/visual4k-host/src/TapTable.cpp)
+target_include_directories(fit_selftest PRIVATE host/visual4k-host/src)
+
 add_executable(edid_selftest
     tools/edid_selftest.cpp
     driver/Visual4kDisplay/Edid.cpp)
@@ -30,6 +35,7 @@ target_include_directories(edid_selftest PRIVATE driver/Visual4kDisplay)
 
 add_test(NAME edid COMMAND edid_selftest)
 add_test(NAME cursor COMMAND cursor_selftest)
+add_test(NAME fit COMMAND fit_selftest)
 
 # The interpreter is called python3 on Unix and python.exe on Windows, so let
 # CMake find it rather than guessing. The parity check itself exits 77 when

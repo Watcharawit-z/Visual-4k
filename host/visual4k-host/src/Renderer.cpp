@@ -137,8 +137,8 @@ HRESULT Renderer::DrawCursor(ID3D11Texture2D* target, const DecodedCursor& shape
     // Scale the cursor by the same ratio as everything else, so it ends up the
     // size it would be on a real 4K panel rather than looming over content
     // that shrank around it.
-    const double scaleX = static_cast<double>(dstWidth_) / srcWidth_;
-    const double scaleY = static_cast<double>(dstHeight_) / srcHeight_;
+    const double scaleX = static_cast<double>(fitWidth_) / srcWidth_;
+    const double scaleY = static_cast<double>(fitHeight_) / srcHeight_;
 
     // Clamped to 1: a large downscale ratio can round a thin cursor to zero
     // pixels, and a zero-sized dispatch silently draws nothing.
@@ -153,8 +153,8 @@ HRESULT Renderer::DrawCursor(ID3D11Texture2D* target, const DecodedCursor& shape
     if (FAILED(hr)) return hr;
 
     auto* c = static_cast<CursorConstants*>(mapped.pData);
-    c->destOrigin[0] = static_cast<int32_t>(std::lround(sourceX * scaleX));
-    c->destOrigin[1] = static_cast<int32_t>(std::lround(sourceY * scaleY));
+    c->destOrigin[0] = offsetX_ + static_cast<int32_t>(std::lround(sourceX * scaleX));
+    c->destOrigin[1] = offsetY_ + static_cast<int32_t>(std::lround(sourceY * scaleY));
     c->destSize[0] = destW;
     c->destSize[1] = destH;
     c->targetSize[0] = dstWidth_;
@@ -217,9 +217,9 @@ void Renderer::SetSettings(const RendererSettings& settings)
 
 void Renderer::RebuildTapTables()
 {
-    horizontalTaps_ = BuildTapTable(srcWidth_, dstWidth_, settings_.kernel,
+    horizontalTaps_ = BuildTapTable(srcWidth_, fitWidth_, settings_.kernel,
                                     settings_.gaussianSigma);
-    verticalTaps_ = BuildTapTable(srcHeight_, dstHeight_, settings_.kernel,
+    verticalTaps_ = BuildTapTable(srcHeight_, fitHeight_, settings_.kernel,
                                   settings_.gaussianSigma);
 }
 
@@ -295,11 +295,11 @@ HRESULT Renderer::CreateIntermediates()
     // Half-float between the two resolve passes: the horizontal pass has
     // already spent its precision budget on a weighted sum, and re-quantising
     // to 8 bits here shows up as banding in dark gradients.
-    HRESULT hr = makeTexture(dstWidth_, srcHeight_, DXGI_FORMAT_R16G16B16A16_FLOAT,
+    HRESULT hr = makeTexture(fitWidth_, srcHeight_, DXGI_FORMAT_R16G16B16A16_FLOAT,
                              intermediateH_, intermediateHSrv_, intermediateHUav_);
     if (FAILED(hr)) return hr;
 
-    return makeTexture(dstWidth_, dstHeight_, DXGI_FORMAT_R16G16B16A16_FLOAT,
+    return makeTexture(fitWidth_, fitHeight_, DXGI_FORMAT_R16G16B16A16_FLOAT,
                        resolved_, resolvedSrv_, resolvedUav_);
 }
 
@@ -314,12 +314,30 @@ HRESULT Renderer::Resize(uint32_t srcWidth, uint32_t srcHeight,
     if (geometrySame && !tablesDirty_)
         return S_OK;
 
-    const bool needIntermediates = !geometrySame;
-
     srcWidth_ = srcWidth;
     srcHeight_ = srcHeight;
     dstWidth_ = dstWidth;
     dstHeight_ = dstHeight;
+
+    const uint32_t previousFitW = fitWidth_;
+    const uint32_t previousFitH = fitHeight_;
+
+    if (settings_.preserveAspect) {
+        const FitRect fit = FitPreservingAspect(srcWidth, srcHeight,
+                                                dstWidth, dstHeight);
+        fitWidth_ = fit.width;
+        fitHeight_ = fit.height;
+        offsetX_ = fit.x;
+        offsetY_ = fit.y;
+    } else {
+        fitWidth_ = dstWidth;
+        fitHeight_ = dstHeight;
+        offsetX_ = 0;
+        offsetY_ = 0;
+    }
+
+    const bool needIntermediates =
+        !geometrySame || fitWidth_ != previousFitW || fitHeight_ != previousFitH;
 
     RebuildTapTables();
 
@@ -355,7 +373,8 @@ HRESULT Renderer::RunResolvePass(uint32_t axis, ID3D11ShaderResourceView* srcSrv
                                  uint32_t dstW, uint32_t dstH,
                                  ID3D11ShaderResourceView* firstTapSrv,
                                  ID3D11ShaderResourceView* weightsSrv,
-                                 uint32_t tapCount)
+                                 uint32_t tapCount,
+                                 int32_t offsetX, int32_t offsetY)
 {
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     HRESULT hr = context_->Map(resolveCb_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0,
@@ -371,6 +390,9 @@ HRESULT Renderer::RunResolvePass(uint32_t axis, ID3D11ShaderResourceView* srcSrv
     c->axis = axis;
     c->linearize = settings_.linearResolve ? 1u : 0u;
     c->pad = 0;
+    c->outputOffset[0] = offsetX;
+    c->outputOffset[1] = offsetY;
+    c->pad2[0] = c->pad2[1] = 0;
     context_->Unmap(resolveCb_.Get(), 0);
 
     ID3D11ShaderResourceView* srvs[3] = {firstTapSrv, weightsSrv, srcSrv};
@@ -443,12 +465,15 @@ HRESULT Renderer::Render(ID3D11Texture2D* source, ID3D11Texture2D* target)
     if (FAILED(hr)) return hr;
 
     auto* c = static_cast<SharpenConstants*>(mapped.pData);
-    c->size[0] = dstWidth_;
-    c->size[1] = dstHeight_;
+    c->size[0] = fitWidth_;
+    c->size[1] = fitHeight_;
     // FSR's convention: the shader constant is exp2(-stops), so 0 stops is
     // maximum sharpening and each additional stop halves it.
     c->sharpness = std::exp2f(-settings_.sharpnessStops);
     c->denoise = settings_.denoise ? 1u : 0u;
+    c->outputOffset[0] = offsetX_;
+    c->outputOffset[1] = offsetY_;
+    c->pad[0] = c->pad[1] = 0;
     context_->Unmap(sharpenCb_.Get(), 0);
 
     ID3D11ShaderResourceView* srvs[1] = {resolvedSrv_.Get()};
@@ -459,7 +484,7 @@ HRESULT Renderer::Render(ID3D11Texture2D* source, ID3D11Texture2D* target)
     context_->CSSetConstantBuffers(0, 1, cbs);
     context_->CSSetShaderResources(0, 1, srvs);
     context_->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-    context_->Dispatch(DispatchCount(dstWidth_), DispatchCount(dstHeight_), 1);
+    context_->Dispatch(DispatchCount(fitWidth_), DispatchCount(fitHeight_), 1);
 
     UnbindComputeStage();
     return S_OK;

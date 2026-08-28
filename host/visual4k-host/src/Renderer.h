@@ -42,6 +42,17 @@ struct RendererSettings {
     // makes antialiased text look thinner than the same text on a real 4K
     // panel. Off for the desktop, on for video. See docs/ALGORITHMS.md.
     bool linearResolve = false;
+
+    // Fit the source inside the panel instead of stretching it to fill.
+    //
+    // The resolve maps the source onto the destination axis by axis, so a
+    // source whose aspect ratio differs from the panel's comes out squeezed:
+    // 3440x1440 onto a 2560x1440 panel compresses horizontally by 1.34x and
+    // not at all vertically, and everything looks thin. Fitting letterboxes
+    // instead. Off means the old behaviour, which is right only when the two
+    // aspect ratios already match -- as they do for a 4K virtual display on a
+    // 1440p panel.
+    bool preserveAspect = true;
 };
 
 // Owns every GPU resource whose size depends on the source or panel geometry.
@@ -94,6 +105,8 @@ private:
         uint32_t axis;
         uint32_t linearize;
         uint32_t pad;
+        int32_t outputOffset[2];
+        uint32_t pad2[2];
     };
     static_assert(sizeof(ResolveConstants) % 16 == 0,
                   "constant buffers must be 16-byte aligned");
@@ -111,6 +124,8 @@ private:
         uint32_t size[2];
         float sharpness;
         uint32_t denoise;
+        int32_t outputOffset[2];
+        uint32_t pad[2];
     };
     static_assert(sizeof(SharpenConstants) % 16 == 0,
                   "constant buffers must be 16-byte aligned");
@@ -129,7 +144,8 @@ private:
                            uint32_t dstW, uint32_t dstH,
                            ID3D11ShaderResourceView* firstTapSrv,
                            ID3D11ShaderResourceView* weightsSrv,
-                           uint32_t tapCount);
+                           uint32_t tapCount,
+                           int32_t offsetX = 0, int32_t offsetY = 0);
     void UnbindComputeStage();
 
     ComPtr<ID3D11Device> device_;
@@ -184,6 +200,15 @@ private:
     uint32_t srcHeight_ = 0;
     uint32_t dstWidth_ = 0;
     uint32_t dstHeight_ = 0;
+
+    // The rectangle inside the panel the resolve actually writes to. Equal to
+    // the panel when stretching or when the aspect ratios match; smaller, and
+    // centred, when letterboxing.
+    uint32_t fitWidth_ = 0;
+    uint32_t fitHeight_ = 0;
+    int32_t offsetX_ = 0;
+    int32_t offsetY_ = 0;
+
     bool tablesDirty_ = true;
 };
 

@@ -36,6 +36,22 @@ double EvaluateKernel(Kernel k, double x, double gaussianSigma = 0.5);
 // Maps a DSR-style smoothness percentage (0..100) onto a Gaussian sigma.
 double DsrSmoothnessToSigma(double smoothnessPercent);
 
+// Where the source lands inside the panel once its aspect ratio is honoured.
+// Equal to the whole panel when the ratios already match; smaller and centred
+// otherwise, with the remainder left as black bars.
+struct FitRect {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    int32_t x = 0;
+    int32_t y = 0;
+};
+
+// Fits src inside dst without distorting it. Never returns a zero dimension,
+// and never returns a rectangle larger than dst, so the caller can size
+// textures from it directly.
+FitRect FitPreservingAspect(uint32_t srcWidth, uint32_t srcHeight,
+                            uint32_t dstWidth, uint32_t dstHeight);
+
 // The table the shader consumes. firstTap[d] is the source index of tap 0 for
 // destination pixel d; weights[d * tapCount + t] is that tap's weight. Every
 // row sums to 1, and out-of-range taps are folded onto the border pixel
