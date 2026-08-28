@@ -253,8 +253,15 @@ jobs:
           $iddcxHeader = Get-ChildItem $kit -Filter "iddcx.h" -Recurse `
                              -ErrorAction SilentlyContinue |
                          Sort-Object FullName -Descending | Select-Object -First 1
-          $iddcxLib = Get-ChildItem $kit -Filter "IddCx.lib" -Recurse `
-                          -ErrorAction SilentlyContinue |
+          # Search on the stem rather than an exact name: the linker reported
+          # LNK1104 for IddCx.lib while WdfDriverStubUm.lib resolved fine, so
+          # the file is either named differently or somewhere unexpected.
+          $iddcxLibs = Get-ChildItem $kit -Filter "iddcx*.lib" -Recurse `
+                           -ErrorAction SilentlyContinue
+          Write-Host "IddCx import libraries found under the kit:"
+          $iddcxLibs | ForEach-Object { Write-Host "  $($_.FullName)" }
+
+          $iddcxLib = $iddcxLibs |
                       Where-Object { $_.FullName -match '\\x64\\' } |
                       Sort-Object FullName -Descending | Select-Object -First 1
 
@@ -290,8 +297,9 @@ jobs:
             Write-Host "IddCx.lib: $($iddcxLib.FullName)"
             $iddcxLibDir = $iddcxLib.DirectoryName
           } else {
-            Write-Host "::warning::IddCx.lib not found anywhere under $kit"
-            $iddcxLibDir = ""
+            # Failing here beats failing at link time with LNK1104, which says
+            # nothing about where the file was looked for.
+            throw "no x64 IddCx import library under $kit (see the listing above)"
           }
 
           msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
