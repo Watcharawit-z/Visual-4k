@@ -114,8 +114,10 @@ private:
     struct CursorConstants {
         int32_t destOrigin[2];
         uint32_t destSize[2];
-        uint32_t targetSize[2];
+        int32_t clipOrigin[2];
+        uint32_t clipSize[2];
         float invDestSize[2];
+        uint32_t pad[2];
     };
     static_assert(sizeof(CursorConstants) % 16 == 0,
                   "constant buffers must be 16-byte aligned");

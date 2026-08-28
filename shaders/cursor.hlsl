@@ -21,8 +21,10 @@ cbuffer CursorConstants : register(b0)
 {
     int2  gDestOrigin;    // top-left of the cursor, in target pixels
     uint2 gDestSize;      // cursor footprint on the target, after scaling
-    uint2 gTargetSize;
+    int2  gClipOrigin;    // top-left of the area the desktop occupies
+    uint2 gClipSize;      // its extent; smaller than the panel when letterboxed
     float2 gInvDestSize;
+    uint2 gPad;
 };
 
 Texture2D<float4> gCursor : register(t0);
@@ -40,8 +42,9 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     const int2 p = gDestOrigin + int2(tid.xy);
 
     // The pointer is routinely half off-screen at the edges of the desktop.
-    if (p.x < 0 || p.y < 0 ||
-        p.x >= int(gTargetSize.x) || p.y >= int(gTargetSize.y))
+    if (p.x < gClipOrigin.x || p.y < gClipOrigin.y ||
+        p.x >= gClipOrigin.x + int(gClipSize.x) ||
+        p.y >= gClipOrigin.y + int(gClipSize.y))
         return;
 
     const float2 uv = (float2(tid.xy) + 0.5f) * gInvDestSize;

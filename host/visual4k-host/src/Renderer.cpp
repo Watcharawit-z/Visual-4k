@@ -157,8 +157,13 @@ HRESULT Renderer::DrawCursor(ID3D11Texture2D* target, const DecodedCursor& shape
     c->destOrigin[1] = offsetY_ + static_cast<int32_t>(std::lround(sourceY * scaleY));
     c->destSize[0] = destW;
     c->destSize[1] = destH;
-    c->targetSize[0] = dstWidth_;
-    c->targetSize[1] = dstHeight_;
+    // Clipped to the fitted rectangle, not the whole panel: a pointer sitting
+    // on the source's bottom edge would otherwise spill its lower half into
+    // the letterbox bar, where no desktop exists for it to be on.
+    c->clipOrigin[0] = offsetX_;
+    c->clipOrigin[1] = offsetY_;
+    c->clipSize[0] = fitWidth_;
+    c->clipSize[1] = fitHeight_;
     c->invDestSize[0] = 1.0f / static_cast<float>(destW);
     c->invDestSize[1] = 1.0f / static_cast<float>(destH);
     context_->Unmap(cursorCb_.Get(), 0);
