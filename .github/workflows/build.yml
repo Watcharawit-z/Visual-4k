@@ -61,6 +61,12 @@ jobs:
       - name: Parse the XML files
         run: python3 tools/check-xml-comments.py
 
+      # The version the driver is compiled for and the version its INF asks
+      # Windows to load have to agree, and when they did not the failure was
+      # invisible to the build and cost a full install cycle to find.
+      - name: Check the IddCx version is consistent
+        run: python3 tools/check-iddcx-version.py
+
       - name: Parse the PowerShell scripts
         shell: pwsh
         run: |
@@ -314,26 +320,23 @@ jobs:
                       Where-Object { $_.FullName -match '\\x64\\' } |
                       Sort-Object FullName -Descending | Select-Object -First 1
 
-          # The kit installs IddCx under um\iddcx\MAJOR.MINOR, and its headers
-          # hard-error without matching version macros, so read the version off
-          # the directory rather than pinning one that may not be installed.
-          $iddcxMajor = "1"
-          $iddcxMinor = "9"
-          $iddcxVersionDir = Get-ChildItem "$kit\Include\*\um\iddcx" -Directory `
-                                 -ErrorAction SilentlyContinue |
-                             Where-Object { $_.Name -match '^(\d+)\.(\d+)$' } |
-                             Sort-Object {
-                                 $p = $_.Name -split '\.'
-                                 [int]$p[0] * 1000 + [int]$p[1]
-                             } -Descending | Select-Object -First 1
-          if ($iddcxVersionDir) {
-            $parts = $iddcxVersionDir.Name -split '\.'
-            $iddcxMajor = $parts[0]
-            $iddcxMinor = $parts[1]
-            Write-Host "IddCx version: $iddcxMajor.$iddcxMinor ($($iddcxVersionDir.FullName))"
-          } else {
-            Write-Host "::warning::no versioned IddCx directory found; assuming $iddcxMajor.$iddcxMinor"
-          }
+          # The IddCx version is NOT read off the kit any more, and that is the
+          # whole point of this comment.
+          #
+          # It used to be, and the driver was therefore compiled against
+          # whatever the runner had installed -- 1.9 -- while the INF asked
+          # Windows to load IddCx0102, version 1.2. The version macros decide
+          # the size and shape of IDD_CX_CLIENT_CONFIG, so the driver handed
+          # the 1.2 class extension a structure it did not recognise,
+          # IddCxDeviceInitConfig refused it, EvtDeviceAdd returned the
+          # failure, and the device came up with CM_PROB_FAILED_ADD: driver
+          # loaded, device created, nothing worked. Nothing in the build could
+          # see it, because both halves were individually correct.
+          #
+          # The version now comes from the project file, matching the INF, and
+          # tools/check-iddcx-version.py fails the build if they ever diverge
+          # again. The kit's headers gate their declarations on these macros
+          # precisely so a newer kit can build for an older extension.
 
           if ($iddcxHeader) {
             Write-Host "iddcx.h: $($iddcxHeader.FullName)"
@@ -359,8 +362,6 @@ jobs:
                   "/p:Visual4kIddCxInclude=$iddcxInclude" `
                   "/p:Visual4kIddCxLib=$iddcxLibDir" `
                   "/p:Visual4kIddCxLibFile=$iddcxLibFile" `
-                  /p:Visual4kIddCxMajor=$iddcxMajor `
-                  /p:Visual4kIddCxMinor=$iddcxMinor `
                   /v:normal /p:SignMode=Off
           if ($LASTEXITCODE -ne 0) { throw "driver build failed" }
 

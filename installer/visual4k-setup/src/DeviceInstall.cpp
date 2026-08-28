@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <setupapi.h>
 #include <newdev.h>
+#include <cfgmgr32.h>
 
 #include <algorithm>
 #include <cstring>
@@ -80,6 +81,89 @@ bool VirtualDisplayDevicePresent()
     }
     SetupDiDestroyDeviceInfoList(set);
     return found;
+}
+
+namespace {
+
+// The problem codes a driver install can realistically produce, in the words
+// that say what to do about them. Windows' own text is written for a user
+// looking at hardware they bought, and says "contact the manufacturer".
+std::wstring ExplainProblem(uint32_t code)
+{
+    switch (code) {
+        case 0:
+            return L"";
+        case 31:  // CM_PROB_FAILED_ADD
+            return L"The driver loaded, and then refused the device.\n"
+                   L"  This is a fault in the driver itself rather than in the "
+                   L"install:\n"
+                   L"  its EvtDeviceAdd callback returned a failure. The usual "
+                   L"cause is\n"
+                   L"  an IddCx version mismatch between the driver binary and "
+                   L"the INF.";
+        case 52:  // CM_PROB_UNSIGNED_DRIVER
+            return L"Windows refused the driver's signature.\n"
+                   L"  Test signing is not actually on. Turning it on needs a "
+                   L"restart, and\n"
+                   L"  Secure Boot overrides it entirely -- the setting then "
+                   L"succeeds and\n"
+                   L"  does nothing.";
+        case 28:  // CM_PROB_FAILED_INSTALL
+            return L"No driver is installed for the device.\n"
+                   L"  The device node was created but nothing bound to it.";
+        case 39:  // CM_PROB_DRIVER_FAILED_LOAD
+            return L"Windows could not load the driver binary.\n"
+                   L"  It is missing, unreadable, or corrupt in the driver "
+                   L"store.";
+        case 37:  // CM_PROB_FAILED_DRIVER_ENTRY
+            return L"The driver's entry point returned a failure.";
+        case 10:  // CM_PROB_FAILED_START
+            return L"The device failed to start.";
+        case 18:  // CM_PROB_REINSTALL
+            return L"The driver needs reinstalling.";
+        case 19:  // CM_PROB_REGISTRY
+            return L"The device's registry configuration is damaged.\n"
+                   L"  Remove it with option 3 and install again.";
+        default:
+            return L"Windows reported a problem with the device.";
+    }
+}
+
+}  // namespace
+
+DeviceStatus QueryVirtualDisplayStatus()
+{
+    DeviceStatus status;
+
+    // DIGCF_PRESENT is deliberately absent: a device that failed to start is
+    // exactly the case worth reporting, and filtering to present devices can
+    // hide it.
+    HDEVINFO set = SetupDiGetClassDevsW(&kDisplayClass, nullptr, nullptr, 0);
+    if (set == INVALID_HANDLE_VALUE)
+        return status;
+
+    SP_DEVINFO_DATA data = {};
+    for (DWORD i = 0;; ++i) {
+        data.cbSize = sizeof(data);
+        if (!SetupDiEnumDeviceInfo(set, i, &data))
+            break;
+        if (!DeviceHasOurHardwareId(set, &data))
+            continue;
+
+        status.present = true;
+
+        ULONG state = 0;
+        ULONG problem = 0;
+        if (CM_Get_DevNode_Status(&state, &problem, data.DevInst, 0) == CR_SUCCESS) {
+            status.problemCode = static_cast<uint32_t>(problem);
+            status.started = (state & DN_STARTED) != 0 && problem == 0;
+            status.explanation = ExplainProblem(status.problemCode);
+        }
+        break;
+    }
+
+    SetupDiDestroyDeviceInfoList(set);
+    return status;
 }
 
 Result InstallVirtualDisplay(const std::wstring& infPath, bool* rebootRequired)

@@ -391,12 +391,29 @@ bool StepArrangeDisplays(const Paths& paths,
     if (!WaitForVirtualDisplay(&virtualDisplay, kDisplayAppearSeconds,
                                displaysBefore) &&
         !AskWhichDisplay(&virtualDisplay)) {
+        Blank();
         Line(L"No virtual display appeared.", Tone::Bad);
-        Line(L"Open Device Manager and look under Display adapters for");
-        Line(L"\"Visual-4k Virtual Display\". If it is there with a warning");
-        Line(L"triangle, its error code says why Windows would not start it;");
-        Line(L"code 52 means the signature was refused, which means test");
-        Line(L"signing is not actually on yet.");
+        Blank();
+
+        // Windows already knows why. Reading it here turns "it did not work"
+        // into a specific cause, without a trip through Device Manager.
+        const DeviceStatus status = QueryVirtualDisplayStatus();
+        if (!status.present) {
+            Line(L"The device is not there at all, which means the install did "
+                 L"not take.", Tone::Bad);
+            Line(L"Try option 3 to remove what exists, then option 1 again.");
+        } else if (status.started) {
+            Line(L"The device is present and running, so the driver is fine "
+                 L"and only the", Tone::Warn);
+            Line(L"display did not come up. That is worth reporting as a bug.",
+                 Tone::Warn);
+        } else {
+            Line(L"Windows reports the device as present but stopped:", Tone::Bad);
+            Line(L"  problem code " + std::to_wstring(status.problemCode),
+                 Tone::Bad);
+            if (!status.explanation.empty())
+                Line(L"  " + status.explanation);
+        }
         return false;
     }
     Line(L"  virtual display: " + virtualDisplay.deviceName + L" (" +

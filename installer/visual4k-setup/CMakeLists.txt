@@ -27,7 +27,7 @@ target_compile_definitions(visual4k-setup PRIVATE
 # setupapi and newdev are what devcon uses to create a root-enumerated device;
 # crypt32 puts the build's certificate into the machine trust stores.
 target_link_libraries(visual4k-setup PRIVATE
-    setupapi newdev crypt32 advapi32 user32)
+    setupapi newdev cfgmgr32 crypt32 advapi32 user32)
 
 if(MSVC)
     target_compile_options(visual4k-setup PRIVATE /W4 /permissive-)

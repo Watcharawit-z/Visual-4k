@@ -83,10 +83,24 @@
     <!-- IddCx is versioned the same way WDF is, and its headers refuse to
          compile without the version macros: IddCxFuncEnum.h stops with
          "IDDCX_VERSION_MAJOR is not defined" rather than picking a default.
-         The kit installs them under um\iddcx\MAJOR.MINOR, so CI reads the
-         version off that directory and passes it. -->
+
+         These are pinned, and must stay equal to the UmdfExtensions value in
+         Visual4kDisplay.inf, which asks Windows to load IddCx0102.
+
+         They were previously read off whatever version the build machine's
+         kit had installed, which produced a driver compiled for IddCx 1.9 and
+         an INF asking for 1.2. The macros decide the size and layout of
+         IDD_CX_CLIENT_CONFIG, so IddCxDeviceInitConfig was handed a structure
+         the loaded extension did not recognise and refused it. The device
+         installed, bound its driver, and failed to start with
+         CM_PROB_FAILED_ADD. Both halves were individually correct, so nothing
+         in the build could see it.
+
+         Building for the older version against newer headers is exactly what
+         the version macros are for; it is also what keeps this driver usable
+         on Windows releases that do not ship the newest extension. -->
     <Visual4kIddCxMajor Condition="'$(Visual4kIddCxMajor)' == ''">1</Visual4kIddCxMajor>
-    <Visual4kIddCxMinor Condition="'$(Visual4kIddCxMinor)' == ''">9</Visual4kIddCxMinor>
+    <Visual4kIddCxMinor Condition="'$(Visual4kIddCxMinor)' == ''">2</Visual4kIddCxMinor>
 
     <!-- The full path of the IddCx import library, not just its directory.
          Adding the directory and naming IddCx.lib still failed to link, so

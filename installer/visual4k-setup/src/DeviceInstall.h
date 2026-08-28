@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "CertTrust.h"  // Result
@@ -26,6 +27,21 @@ bool VirtualDisplayDevicePresent();
 // the driver to it. Removes the node again if the binding fails, so a failed
 // run does not leave a dead device behind for the next one to trip over.
 Result InstallVirtualDisplay(const std::wstring& infPath, bool* rebootRequired);
+
+// What Windows thinks of the device once it exists.
+//
+// "The driver installed but no display appeared" is not a diagnosis, and
+// sending someone to Device Manager to find the real one costs a round trip
+// and assumes they know where to look. Windows already recorded exactly why;
+// this reads it.
+struct DeviceStatus {
+    bool present = false;
+    bool started = false;
+    uint32_t problemCode = 0;
+    std::wstring explanation;   // what the code means, and what to do
+};
+
+DeviceStatus QueryVirtualDisplayStatus();
 
 // Removes every device with our hardware ID, then deletes the package from the
 // driver store.
