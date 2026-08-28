@@ -66,6 +66,11 @@ using REFIID = const IID&;
 using REFGUID = const GUID&;
 struct LUID { DWORD LowPart; LONG HighPart; };
 
+union LARGE_INTEGER {
+    struct { DWORD LowPart; LONG HighPart; } u;
+    LONGLONG QuadPart;
+};
+
 struct POINT { LONG x, y; };
 struct RECT { LONG left, top, right, bottom; };
 struct SIZE { LONG cx, cy; };

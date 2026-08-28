@@ -54,8 +54,8 @@ struct DXGI_OUTDUPL_POINTER_SHAPE_INFO {
 #define DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR 0x4
 
 struct DXGI_OUTDUPL_FRAME_INFO {
-    LONGLONG LastPresentTime;
-    LONGLONG LastMouseUpdateTime;
+    LARGE_INTEGER LastPresentTime;
+    LARGE_INTEGER LastMouseUpdateTime;
     UINT AccumulatedFrames;
     BOOL RectsCoalesced;
     BOOL ProtectedContentMaskedOut;

@@ -82,6 +82,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
+// Narrows a wide argument to ASCII, refusing anything outside it.
+//
+// The obvious std::string(w.begin(), w.end()) truncates each wchar_t to a
+// char without complaint, so a mistyped kernel name containing a non-ASCII
+// character would arrive as mojibake and be reported as "unknown kernel"
+// rather than as the encoding problem it is.
+bool NarrowAscii(const wchar_t* text, std::string* out)
+{
+    out->clear();
+    for (const wchar_t* p = text; *p != L'\0'; ++p) {
+        if (*p < 0 || *p > 127) return false;
+        out->push_back(static_cast<char>(*p));
+    }
+    return true;
+}
+
 bool ParseOptions(int argc, wchar_t** argv, Options* opt)
 {
     for (int i = 1; i < argc; ++i) {
@@ -107,8 +123,11 @@ bool ParseOptions(int argc, wchar_t** argv, Options* opt)
         } else if (arg == L"--kernel") {
             const wchar_t* v = next(L"--kernel");
             if (!v) return false;
-            const std::wstring w = v;
-            const std::string narrow(w.begin(), w.end());
+            std::string narrow;
+            if (!NarrowAscii(v, &narrow)) {
+                std::fwprintf(stderr, L"--kernel takes an ASCII name\n");
+                return false;
+            }
             try {
                 opt->renderer.kernel = KernelFromName(narrow);
             } catch (const std::exception& e) {

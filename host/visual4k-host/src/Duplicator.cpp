@@ -106,7 +106,7 @@ HRESULT Duplicator::UpdatePointer(const DXGI_OUTDUPL_FRAME_INFO& info)
     // Visibility and position arrive on every frame that touched the pointer.
     // LastMouseUpdateTime of 0 means it did not move, so the previous position
     // still stands.
-    if (info.LastMouseUpdateTime != 0) {
+    if (info.LastMouseUpdateTime.QuadPart != 0) {
         pointer_.visible = info.PointerPosition.Visible != FALSE;
         pointer_.x = info.PointerPosition.Position.x;
         pointer_.y = info.PointerPosition.Position.y;
