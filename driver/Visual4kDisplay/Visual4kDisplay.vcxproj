@@ -95,8 +95,12 @@
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <!-- Visual4kIddCxInclude and Visual4kIddCxLib are normally empty: the
+           IddCx headers sit in the kit's um directory, which the SDK already
+           contributes. They exist because a kit can place them elsewhere, and
+           an empty entry costs nothing. -->
       <AdditionalIncludeDirectories>
-        $(Visual4kWdfInclude);%(AdditionalIncludeDirectories)
+        $(Visual4kWdfInclude);$(Visual4kIddCxInclude);%(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
       <PreprocessorDefinitions>
         _UNICODE;UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;UMDF_USING_NTSTATUS;UMDF_VERSION_MAJOR=$(UmdfVersionMajor);UMDF_VERSION_MINOR=$(UmdfVersionMinor);%(PreprocessorDefinitions)
@@ -108,7 +112,7 @@
       <!-- IddCx.lib is the class extension; avrt.lib is for the swap-chain
            thread's MMCSS registration. -->
       <AdditionalLibraryDirectories>
-        $(Visual4kWdfLib);%(AdditionalLibraryDirectories)
+        $(Visual4kWdfLib);$(Visual4kIddCxLib);%(AdditionalLibraryDirectories)
       </AdditionalLibraryDirectories>
       <AdditionalDependencies>
         WdfDriverStubUm.lib;IddCx.lib;d3d11.lib;dxgi.lib;avrt.lib;%(AdditionalDependencies)

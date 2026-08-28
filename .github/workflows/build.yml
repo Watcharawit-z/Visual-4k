@@ -246,10 +246,39 @@ jobs:
           $minor = $umdf.Name -replace '^2\.', ''
           Write-Host "using UMDF 2.$minor"
 
+          # IddCx is a class extension shipped with the WDK, and where its
+          # header lands varies between kits. Locate it rather than assuming
+          # the SDK's um directory carries it.
+          $kit = "C:\Program Files (x86)\Windows Kits\10"
+          $iddcxHeader = Get-ChildItem $kit -Filter "iddcx.h" -Recurse `
+                             -ErrorAction SilentlyContinue |
+                         Sort-Object FullName -Descending | Select-Object -First 1
+          $iddcxLib = Get-ChildItem $kit -Filter "IddCx.lib" -Recurse `
+                          -ErrorAction SilentlyContinue |
+                      Where-Object { $_.FullName -match '\\x64\\' } |
+                      Sort-Object FullName -Descending | Select-Object -First 1
+
+          if ($iddcxHeader) {
+            Write-Host "iddcx.h: $($iddcxHeader.FullName)"
+            $iddcxInclude = $iddcxHeader.DirectoryName
+          } else {
+            Write-Host "::warning::iddcx.h not found anywhere under $kit"
+            $iddcxInclude = ""
+          }
+          if ($iddcxLib) {
+            Write-Host "IddCx.lib: $($iddcxLib.FullName)"
+            $iddcxLibDir = $iddcxLib.DirectoryName
+          } else {
+            Write-Host "::warning::IddCx.lib not found anywhere under $kit"
+            $iddcxLibDir = ""
+          }
+
           msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
                   /p:Configuration=Release /p:Platform=x64 `
                   /p:UmdfVersionMinor=$minor `
                   /p:Visual4kUmdfVersion=2.$minor `
+                  /p:Visual4kIddCxInclude=$iddcxInclude `
+                  /p:Visual4kIddCxLib=$iddcxLibDir `
                   /v:normal /p:SignMode=Off
           if ($LASTEXITCODE -ne 0) { throw "driver build failed" }
 
