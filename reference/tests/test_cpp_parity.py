@@ -72,3 +72,15 @@ def test_cpp_rows_normalise(selftest_binary):
     """A row that does not sum to 1 is visible as banding on the panel."""
     _, w = _cpp_table(selftest_binary, 3840, 2560, "lanczos2")
     assert np.abs(w.sum(axis=1) - 1.0).max() < 1e-6
+
+
+def test_virtual_monitor_edid_is_valid(tmp_path_factory):
+    """A malformed EDID appears on Windows only as 'monitor has no modes'."""
+    out = tmp_path_factory.mktemp("edid") / "edid_selftest"
+    subprocess.run(
+        [CXX, "-O2", "-std=c++17", "-I", str(ROOT / "driver/Visual4kDisplay"),
+         str(ROOT / "tools/edid_selftest.cpp"),
+         str(ROOT / "driver/Visual4kDisplay/Edid.cpp"), "-o", str(out)],
+        check=True, capture_output=True)
+    result = subprocess.run([str(out)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout

@@ -1,0 +1,72 @@
+;
+; Visual4kDisplay.inf -- indirect display driver for the Visual-4k compositor.
+;
+; Installs a root-enumerated software device; there is no hardware to bind to.
+; The device is created by:
+;     devcon install Visual4kDisplay.inf Root\Visual4kDisplay
+; or, without devcon:
+;     pnputil /add-driver Visual4kDisplay.inf /install
+; followed by adding a "Legacy hardware" device from Device Manager.
+;
+; The driver is unsigned as built. Windows will refuse to load it until either
+; test signing is enabled (bcdedit /set testsigning on, then reboot) or the
+; binary is signed with a certificate the machine trusts. See
+; docs/BUILD-WINDOWS.md.
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Display
+ClassGuid   = {4d36e968-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = Visual4kDisplay.cat
+DriverVer   = 01/01/2025,1.0.0.0
+PnpLockDown = 1
+
+[Manufacturer]
+%ManufacturerName% = Standard,NT$ARCH$.10.0...16299
+
+; 16299 is the first build with IddCx; declaring it stops the driver from
+; installing on releases where the class extension does not exist.
+[Standard.NT$ARCH$.10.0...16299]
+%DeviceName% = Visual4kDisplay_Install, Root\Visual4kDisplay
+
+[SourceDisksFiles]
+Visual4kDisplay.dll = 1
+
+[SourceDisksNames]
+1 = %DiskName%
+
+[DestinationDirs]
+DefaultDestDir = 13   ; the driver store package directory
+
+[Visual4kDisplay_Install]
+CopyFiles = UMDriverCopy
+
+[Visual4kDisplay_Install.hw]
+AddReg = Visual4kDisplay_HardwareDeviceSettings
+
+[Visual4kDisplay_HardwareDeviceSettings]
+HKR,, "UpperFilters", %REG_MULTI_SZ%, "IndirectKmd"
+
+[Visual4kDisplay_Install.Services]
+AddService = ,2   ; a UMDF driver owns no kernel service
+
+[Visual4kDisplay_Install.wdf]
+UmdfService              = Visual4kDisplay, Visual4kDisplay_Install
+UmdfServiceOrder         = Visual4kDisplay
+UmdfKernelModeClientPolicy = AllowKernelModeClients
+UmdfFileObjectPolicy     = AllowNullAndUnknownFileObjects
+UmdfFsContextUsePolicy   = CannotUseFsContexts
+
+[Visual4kDisplay_Install.Wdf]
+UmdfLibraryVersion = $UMDFVERSION$
+ServiceBinary      = %13%\Visual4kDisplay.dll
+
+[UMDriverCopy]
+Visual4kDisplay.dll
+
+[Strings]
+ManufacturerName = "Visual-4k"
+DiskName         = "Visual-4k Installation Disk"
+DeviceName       = "Visual-4k Virtual Display"
+REG_MULTI_SZ     = 0x00010000
