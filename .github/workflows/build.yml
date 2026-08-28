@@ -294,8 +294,9 @@ jobs:
             $iddcxInclude = ""
           }
           if ($iddcxLib) {
-            Write-Host "IddCx.lib: $($iddcxLib.FullName)"
+            Write-Host "linking against: $($iddcxLib.FullName)"
             $iddcxLibDir = $iddcxLib.DirectoryName
+            $iddcxLibFile = $iddcxLib.FullName
           } else {
             # Failing here beats failing at link time with LNK1104, which says
             # nothing about where the file was looked for.
@@ -306,8 +307,9 @@ jobs:
                   /p:Configuration=Release /p:Platform=x64 `
                   /p:UmdfVersionMinor=$minor `
                   /p:Visual4kUmdfVersion=2.$minor `
-                  /p:Visual4kIddCxInclude=$iddcxInclude `
-                  /p:Visual4kIddCxLib=$iddcxLibDir `
+                  "/p:Visual4kIddCxInclude=$iddcxInclude" `
+                  "/p:Visual4kIddCxLib=$iddcxLibDir" `
+                  "/p:Visual4kIddCxLibFile=$iddcxLibFile" `
                   /p:Visual4kIddCxMajor=$iddcxMajor `
                   /p:Visual4kIddCxMinor=$iddcxMinor `
                   /v:normal /p:SignMode=Off

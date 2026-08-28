@@ -88,6 +88,12 @@
     <Visual4kIddCxMajor Condition="'$(Visual4kIddCxMajor)' == ''">1</Visual4kIddCxMajor>
     <Visual4kIddCxMinor Condition="'$(Visual4kIddCxMinor)' == ''">9</Visual4kIddCxMinor>
 
+    <!-- The full path of the IddCx import library, not just its directory.
+         Adding the directory and naming IddCx.lib still failed to link, so
+         the file the kit ships is not named that; passing what was actually
+         found removes the guess. -->
+    <Visual4kIddCxLibFile Condition="'$(Visual4kIddCxLibFile)' == ''">IddCx.lib</Visual4kIddCxLibFile>
+
     <!-- The INF is signed together with the binary; without a catalog the
          package installs but the driver refuses to load with code 52. -->
     <EnableInf2cat>true</EnableInf2cat>
@@ -123,7 +129,7 @@
         $(Visual4kWdfLib);$(Visual4kIddCxLib);%(AdditionalLibraryDirectories)
       </AdditionalLibraryDirectories>
       <AdditionalDependencies>
-        WdfDriverStubUm.lib;IddCx.lib;d3d11.lib;dxgi.lib;avrt.lib;%(AdditionalDependencies)
+        WdfDriverStubUm.lib;$(Visual4kIddCxLibFile);d3d11.lib;dxgi.lib;avrt.lib;%(AdditionalDependencies)
       </AdditionalDependencies>
     </Link>
     <Inf>
