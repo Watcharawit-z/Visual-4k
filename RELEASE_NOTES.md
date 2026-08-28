@@ -1,40 +1,58 @@
-First build that produces installable binaries. Both Windows components now
-compile from source on every push, and this release carries them together with
-the install scripts and the setup guide.
+The v0.1.0 archive could not install itself. This one can.
 
-## What is in the zip
+## What was wrong with v0.1.0
 
-- `visual4k-host.exe` and `shaders/` — the compositor
-- `driver/` — the Visual4kDisplay virtual display driver and its INF
-- `install-driver.ps1`, `uninstall-driver.ps1`
-- `GETTING-STARTED.md` — the step-by-step guide, including the warnings below
+- `install-driver.ps1` looked for the driver only where a source build puts
+  it, so from the release folder it reported "Driver binary not found".
+- It then called `inf2cat` and `signtool`, which ship with the WDK and the
+  Windows SDK, so using the binaries still required the 90-minute toolchain
+  they exist to avoid.
+- The INF carried the WDK's `$ARCH$` and `$UMDFVERSION$` stamping tokens
+  unsubstituted, never declared `UmdfExtensions` (nothing said the driver
+  needs IddCx at all), had two sections that INF's case-insensitive names
+  merged into one, and pointed `DestinationDirs` at a section that does not
+  exist.
 
-## What is established
+## What changed
 
-- The resampling core, its quality claims, the cursor decoder and the virtual
-  monitor's EDID are covered by 77 tests that run on every push.
-- The C++ and Python tap tables agree to float32 precision (worst delta 3e-8),
-  checked on Windows against the binary being shipped.
-- `visual4k-host` compiles on MSVC with the Windows SDK; `Visual4kDisplay`
-  compiles and links against the WDK.
-- Measured: resolving a 4K render to 1440p is +5.0 dB PSNR over a native 1440p
-  render, with 3.7x less aliasing. At a 2.0x ratio, +9.7 dB and 12x less.
-  Reproduce with `python reference/bench_supersample.py`.
+The build now signs the driver and ships the public certificate beside it, so
+installing needs only Windows' own `pnputil` and `Import-Certificate`. The
+private key exists solely inside the build job and is never exported, so
+trusting that certificate accepts this driver and nothing else.
 
-## What is not
+`install-driver.ps1` finds the driver in either layout, skips the WDK path
+entirely when the package is already signed, and prints the Device Manager
+steps when `devcon` is absent, as it will be without the WDK.
+
+## How to install
+
+```powershell
+# Extract, then open PowerShell in that folder
+Get-ChildItem -Recurse | Unblock-File
+
+# Check the binaries run before touching anything system-wide
+.\visual4k-host.exe --list-displays
+.\edid_selftest.exe
+
+# Then, in an ELEVATED PowerShell:
+.\install-driver.ps1 -WhatIf     # see what it would do
+.\install-driver.ps1
+```
+
+## Still true, and it matters
 
 **Nothing here has been installed or run.** The driver has never loaded, the
-virtual display has never appeared in Windows, and the HLSL has never been
-through a shader compiler, because the compositor compiles it at runtime on a
-GPU. Compiling is not running. Expect to find problems.
+virtual display has never appeared, and the HLSL has never been through a
+shader compiler, because the compositor compiles it at runtime on a GPU. The
+INF in particular has been corrected by inspection, not by an install.
 
 **Windows will not load the driver unless test signing is enabled.** That is a
 boot setting, it needs a reboot, and it lowers the security of the whole
 machine while it is on. On a BitLocker machine, changing boot settings can
-trigger a recovery-key prompt — have your key before you start. Read
-`GETTING-STARTED.md` first; it covers this and the Secure Boot interaction.
+trigger a recovery-key prompt -- have your key before you start. Read
+`GETTING-STARTED.md` first.
 
-**Rendering at 4K costs 2.25x the pixels.** This trades frame rate for image
+**Rendering at 4K costs 2.25x the pixels**, trading frame rate for image
 quality. Latency has not been measured, so no figure is quoted.
 
 ## Trying it without installing anything
