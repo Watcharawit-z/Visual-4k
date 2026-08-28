@@ -53,7 +53,9 @@ void SwapChainProcessor::RunCore()
     // gives the swap chain somewhere to allocate its surfaces.
     IDARG_IN_SWAPCHAINSETDEVICE setDevice = {};
 
-    Microsoft::WRL::ComPtr<IDXGIFactory2> factory;
+    // IDXGIFactory4, not 2: EnumAdapterByLuid was added in the 4 revision, and
+    // matching the render adapter by LUID is the whole point here.
+    Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
     if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(factory.GetAddressOf()))))
         return;
 
@@ -71,7 +73,12 @@ void SwapChainProcessor::RunCore()
                                  context.GetAddressOf())))
         return;
 
-    setDevice.pDevice = device.Get();
+    // IddCx takes the DXGI device, not the D3D11 device it was created from.
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+    if (FAILED(device.As(&dxgiDevice)))
+        return;
+
+    setDevice.pDevice = dxgiDevice.Get();
     if (!NT_SUCCESS(IddCxSwapChainSetDevice(swapChain_, &setDevice)))
         return;
 

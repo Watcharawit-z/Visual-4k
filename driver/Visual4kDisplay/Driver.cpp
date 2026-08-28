@@ -22,6 +22,11 @@ constexpr VirtualMode kModes[] = {
 
 constexpr VirtualMode kPreferredMode = kModes[0];
 
+// D3DKMDT_VSS_OTHER. The constant is declared in d3dkmdt.h, which is a
+// kernel-mode header this user-mode driver has no business including, and the
+// field it feeds is a plain UINT32 bitfield.
+constexpr UINT32 kVideoSignalStandardOther = 255;
+
 NTSTATUS CreateMonitor(DeviceContext* ctx)
 {
     IDDCX_MONITOR_INFO info = {};
@@ -91,8 +96,7 @@ NTSTATUS EvtParseMonitorDescription(
         auto& mode = in->pMonitorModes[i];
         mode.Size = sizeof(IDDCX_MONITOR_MODE);
         mode.Origin = IDDCX_MONITOR_MODE_ORIGIN_DRIVER;
-        mode.MonitorVideoSignalInfo.totalSize = {
-            static_cast<LONG>(kModes[i].width), static_cast<LONG>(kModes[i].height)};
+        mode.MonitorVideoSignalInfo.totalSize = {kModes[i].width, kModes[i].height};
         mode.MonitorVideoSignalInfo.activeSize =
             mode.MonitorVideoSignalInfo.totalSize;
         mode.MonitorVideoSignalInfo.vSyncFreq = {
@@ -104,8 +108,7 @@ NTSTATUS EvtParseMonitorDescription(
             kModes[i].verticalSyncNumerator;
         mode.MonitorVideoSignalInfo.scanLineOrdering =
             DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
-        mode.MonitorVideoSignalInfo.videoStandard =
-            D3DKMDT_VSS_OTHER;
+        mode.MonitorVideoSignalInfo.videoStandard = kVideoSignalStandardOther;
     }
 
     // The first entry is the one Windows picks by default.
@@ -142,7 +145,7 @@ NTSTATUS EvtMonitorQueryTargetModes(
         auto& mode = in->pTargetModes[i];
         mode.Size = sizeof(IDDCX_TARGET_MODE);
         mode.TargetVideoSignalInfo.targetVideoSignalInfo.totalSize = {
-            static_cast<LONG>(kModes[i].width), static_cast<LONG>(kModes[i].height)};
+            kModes[i].width, kModes[i].height};
         mode.TargetVideoSignalInfo.targetVideoSignalInfo.activeSize =
             mode.TargetVideoSignalInfo.targetVideoSignalInfo.totalSize;
         mode.TargetVideoSignalInfo.targetVideoSignalInfo.vSyncFreq = {
