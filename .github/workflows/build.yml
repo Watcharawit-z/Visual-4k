@@ -366,11 +366,17 @@ jobs:
           # The private key lives only in this job and is never exported; only
           # the public certificate goes into the package, so nothing outside
           # this run can sign anything Windows would then trust.
+          # Prefer x64, but fall back to whatever the kit ships: inf2cat.exe is
+          # x86-only, so an x64-only filter finds signtool and then reports the
+          # WDK as missing.
           function Find-KitTool($name) {
-              Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter $name `
-                  -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match '\\x64\\' } |
-              Sort-Object FullName -Descending | Select-Object -First 1
+              $all = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter $name `
+                         -Recurse -ErrorAction SilentlyContinue
+              if (-not $all) { return $null }
+              $x64 = $all | Where-Object { $_.FullName -match '\\x64\\' } |
+                     Sort-Object FullName -Descending | Select-Object -First 1
+              if ($x64) { return $x64 }
+              return $all | Sort-Object FullName -Descending | Select-Object -First 1
           }
           $inf2cat = Find-KitTool 'inf2cat.exe'
           $signtool = Find-KitTool 'signtool.exe'

@@ -183,15 +183,20 @@ if ($prepackaged) {
     # --- WDK tooling -------------------------------------------------------
 
     function Find-KitTool($name) {
+        # Prefer x64, but fall back to whatever the kit ships: inf2cat.exe is
+        # x86-only, so an x64-only filter finds signtool and then reports the
+        # WDK as missing.
         $roots = @("${env:ProgramFiles(x86)}\Windows Kits\10\bin", "${env:ProgramFiles}\Windows Kits\10\bin")
+        $all = @()
         foreach ($r in $roots) {
             if (-not (Test-Path $r)) { continue }
-            $found = Get-ChildItem -Path $r -Filter $name -Recurse -ErrorAction SilentlyContinue |
-                     Where-Object { $_.FullName -match '\\x64\\' } |
-                     Sort-Object FullName -Descending | Select-Object -First 1
-            if ($found) { return $found.FullName }
+            $all += Get-ChildItem -Path $r -Filter $name -Recurse -ErrorAction SilentlyContinue
         }
-        return $null
+        if (-not $all) { return $null }
+        $x64 = $all | Where-Object { $_.FullName -match '\\x64\\' } |
+               Sort-Object FullName -Descending | Select-Object -First 1
+        if ($x64) { return $x64.FullName }
+        return ($all | Sort-Object FullName -Descending | Select-Object -First 1).FullName
     }
 
     $signtool = Find-KitTool 'signtool.exe'
