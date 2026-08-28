@@ -301,9 +301,16 @@ Write-Host @"
 Then:
   1. Settings -> System -> Display. A monitor named "Visual-4k Virtual Display"
      should be listed. Set it to 3840x2160 and make it the primary display.
+     Primary is what makes Windows lay the desktop out at 4K, which is the
+     whole point; a secondary virtual display supersamples nothing.
   2. Set your real panel to Extend (not Duplicate -- the compositor draws on it).
   3. Run the compositor:
        .\visual4k-host.exe
+
+     It reads the primary display and draws on another one. With more than two
+     displays attached, say which:
+       .\visual4k-host.exe --source \\.\DISPLAYn --output \\.\DISPLAYm
+     .\visual4k-host.exe --list-displays prints the names, sizes and positions.
 
   If the screen goes black, wait 15 seconds: Windows reverts a display change
   you do not confirm. Quit the compositor from anywhere with Ctrl+Alt+F12.

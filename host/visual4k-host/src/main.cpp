@@ -3,7 +3,10 @@
 // Usage:
 //   visual4k-host [options]
 //     --list-displays          enumerate outputs and exit
-//     --source <\\.\DISPLAYn>  virtual display to read (default: auto-detect)
+//     --source <\\.\DISPLAYn>  display to read (default: the primary one, which
+//                              is where the virtual 4K display belongs)
+//     --output <\\.\DISPLAYn>  physical panel to draw on (default: the first
+//                              attached display that is not the source)
 //     --kernel <name>          triangle|catrom|mitchell|lanczos2|lanczos3|
 //                              lanczos4|gaussian   (default: lanczos2)
 //     --sharpness <stops>      RCAS strength; 0 is strongest, -1 disables
@@ -48,6 +51,7 @@ namespace {
 
 struct Options {
     std::wstring sourceDisplay;
+    std::wstring outputDisplay;
     std::wstring shaderDir = L"shaders";
     RendererSettings renderer;
     bool listDisplays = false;
@@ -120,6 +124,10 @@ bool ParseOptions(int argc, wchar_t** argv, Options* opt)
             const wchar_t* v = next(L"--source");
             if (!v) return false;
             opt->sourceDisplay = v;
+        } else if (arg == L"--output") {
+            const wchar_t* v = next(L"--output");
+            if (v == nullptr) return false;
+            opt->outputDisplay = v;
         } else if (arg == L"--shaders") {
             const wchar_t* v = next(L"--shaders");
             if (!v) return false;
@@ -162,6 +170,66 @@ bool ParseOptions(int argc, wchar_t** argv, Options* opt)
     return true;
 }
 
+// The display to supersample, when none was named.
+//
+// The primary display, identified by sitting at the virtual desktop's origin.
+// Windows lays the desktop out on the primary, so making the virtual 4K
+// display primary is what causes windows, text and games to be laid out at 4K
+// in the first place -- which makes it the display worth reading.
+//
+// Empty if enumeration fails; Duplicator then falls back to its own scan.
+std::wstring DefaultSource()
+{
+    std::vector<OutputInfo> outputs;
+    if (FAILED(Duplicator::EnumerateOutputs(&outputs)))
+        return std::wstring();
+
+    for (const auto& o : outputs) {
+        if (o.attachedToDesktop && o.left == 0 && o.top == 0)
+            return o.deviceName;
+    }
+    return std::wstring();
+}
+
+// Picks the monitor the resolved image is presented on.
+//
+// It must not be the source. The virtual display is meant to be the primary
+// one -- that is the whole point of it, since the primary is where Windows
+// lays the desktop out, and we want that layout to happen at 4K. So placing
+// the window on the primary, which is what asking Windows for "the screen"
+// gives you, would draw the output straight back onto the display it was
+// captured from and leave the physical panel showing nothing.
+//
+// Returns false when `requested` names a display that is not attached.
+bool ChooseOutput(const std::wstring& requested, const std::wstring& sourceName,
+                  OutputInfo* chosen)
+{
+    std::vector<OutputInfo> outputs;
+    if (FAILED(Duplicator::EnumerateOutputs(&outputs)))
+        return false;
+
+    const OutputInfo* sourceOutput = nullptr;
+    for (const auto& o : outputs) {
+        if (!o.attachedToDesktop)
+            continue;
+        if (!requested.empty()) {
+            if (o.deviceName == requested) { *chosen = o; return true; }
+            continue;
+        }
+        if (o.deviceName == sourceName) { sourceOutput = &o; continue; }
+        *chosen = o;
+        return true;
+    }
+
+    if (!requested.empty())
+        return false;
+
+    // One display in the whole machine: source and output have to be the same
+    // one. Useless in practice, but it beats failing to start during a demo.
+    if (sourceOutput != nullptr) { *chosen = *sourceOutput; return true; }
+    return false;
+}
+
 int ListDisplays()
 {
     std::vector<OutputInfo> outputs;
@@ -170,8 +238,8 @@ int ListDisplays()
         return 1;
     }
     for (const auto& o : outputs) {
-        std::wprintf(L"%-16ls %5ux%-5u %ls\n", o.deviceName.c_str(),
-                     o.width, o.height,
+        std::wprintf(L"%-16ls %5ux%-5u at %+5d,%+5d %ls\n", o.deviceName.c_str(),
+                     o.width, o.height, o.left, o.top,
                      o.attachedToDesktop ? L"attached" : L"detached");
     }
     return 0;
@@ -211,6 +279,9 @@ int wmain(int argc, wchar_t** argv)
     }
 
     Duplicator duplicator;
+    if (opt.sourceDisplay.empty())
+        opt.sourceDisplay = DefaultSource();
+
     hr = duplicator.Initialize(device.Get(), opt.sourceDisplay);
     if (FAILED(hr)) {
         std::fwprintf(stderr,
@@ -231,12 +302,33 @@ int wmain(int argc, wchar_t** argv)
     wc.lpszClassName = L"Visual4kHostWindow";
     RegisterClassExW(&wc);
 
-    const int panelW = GetSystemMetrics(SM_CXSCREEN);
-    const int panelH = GetSystemMetrics(SM_CYSCREEN);
+    OutputInfo panel;
+    if (!ChooseOutput(opt.outputDisplay, duplicator.DeviceName(), &panel)) {
+        if (opt.outputDisplay.empty()) {
+            std::fwprintf(stderr, L"no display available to draw on\n");
+        } else {
+            std::fwprintf(stderr,
+                          L"--output %ls is not an attached display; "
+                          L"run --list-displays to see the names\n",
+                          opt.outputDisplay.c_str());
+        }
+        return 1;
+    }
+
+    if (panel.deviceName == duplicator.DeviceName()) {
+        std::fwprintf(stderr,
+                      L"warning: drawing onto the same display being captured; "
+                      L"expect a black or recursive image. Pass --output with a "
+                      L"different display.\n");
+    }
+
+    const int panelW = static_cast<int>(panel.width);
+    const int panelH = static_cast<int>(panel.height);
 
     g_window = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP,
                                wc.lpszClassName, L"Visual-4k",
-                               WS_POPUP | WS_VISIBLE, 0, 0, panelW, panelH,
+                               WS_POPUP | WS_VISIBLE,
+                               panel.left, panel.top, panelW, panelH,
                                nullptr, nullptr, wc.hInstance, nullptr);
     if (g_window == nullptr) {
         std::fwprintf(stderr, L"CreateWindowEx failed\n");
@@ -296,8 +388,10 @@ int wmain(int argc, wchar_t** argv)
         return 1;
     }
 
-    std::wprintf(L"panel : %dx%d, kernel %hs, sharpness %.2f stops, cursor %ls\n",
-                 panelW, panelH, KernelName(opt.renderer.kernel),
+    std::wprintf(L"panel : %ls (%dx%d), kernel %hs, sharpness %.2f stops, "
+                 L"cursor %ls\n",
+                 panel.deviceName.c_str(), panelW, panelH,
+                 KernelName(opt.renderer.kernel),
                  opt.renderer.sharpnessStops,
                  opt.drawCursor ? L"on" : L"off");
     std::wprintf(L"aspect: %ls\n",

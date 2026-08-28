@@ -36,6 +36,8 @@ HRESULT Duplicator::EnumerateOutputs(std::vector<OutputInfo>* outputs)
                                                desc.DesktopCoordinates.left);
             info.height = static_cast<uint32_t>(desc.DesktopCoordinates.bottom -
                                                 desc.DesktopCoordinates.top);
+            info.left = static_cast<int32_t>(desc.DesktopCoordinates.left);
+            info.top = static_cast<int32_t>(desc.DesktopCoordinates.top);
             info.attachedToDesktop = desc.AttachedToDesktop != FALSE;
             outputs->push_back(info);
         }

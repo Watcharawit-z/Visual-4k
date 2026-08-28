@@ -31,6 +31,11 @@ struct OutputInfo {
     std::wstring deviceName;      // e.g. "\\\\.\\DISPLAY3"
     uint32_t width = 0;
     uint32_t height = 0;
+    // Top-left in virtual-desktop coordinates. Needed to put the output window
+    // on a chosen monitor: only the primary sits at (0, 0), and monitors left
+    // of or above it have negative coordinates.
+    int32_t left = 0;
+    int32_t top = 0;
     bool attachedToDesktop = false;
 };
 
