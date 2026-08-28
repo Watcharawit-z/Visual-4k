@@ -417,12 +417,26 @@ jobs:
           Export-Certificate -Cert $cert `
               -FilePath (Join-Path $out 'Visual4k-Build-Certificate.cer') | Out-Null
 
+          # Informational only. This certificate is deliberately not trusted on
+          # the runner, so verify is expected to fail here; it succeeds on a
+          # machine that has run install-driver.ps1.
+          #
+          # Its exit code has to be cleared: a pwsh step exits with the last
+          # $LASTEXITCODE, so leaving this one set fails the step after every
+          # file has already been signed correctly.
           & $signtool.FullName verify /pa /v $cat
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "::warning::signtool verify reported a problem; the certificate is not yet trusted on this runner, which is expected"
-          }
+          Write-Host "signtool verify exit code: $LASTEXITCODE (expected non-zero here)"
+          $global:LASTEXITCODE = 0
 
-          Get-ChildItem $out | Select-Object Name, Length
+          Write-Host "signed package contents:"
+          Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)  $($_.Length)" }
+
+          foreach ($required in 'Visual4kDisplay.dll', 'Visual4kDisplay.inf',
+                                'Visual4kDisplay.cat', 'Visual4k-Build-Certificate.cer') {
+              if (-not (Test-Path (Join-Path $out $required))) {
+                  throw "$required missing from the signed package"
+              }
+          }
 
       - uses: actions/upload-artifact@v4
         with:
