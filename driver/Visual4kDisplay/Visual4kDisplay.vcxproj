@@ -47,6 +47,14 @@
          lets a single binary install on Desktop, IoT and Windows on ARM. -->
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
     <DriverType>UMDF</DriverType>
+    <!-- The WDK derives the WDF include and library directories from these,
+         as Include\wdf\umdf\MAJOR.MINOR. Without them the driver toolset still
+         activates and DriverType is still UMDF, but IncludePath comes out with
+         no WDF entry at all and the build fails on wdf.h, which looks exactly
+         like a missing WDK. The minor version is overridable so CI can pass
+         whatever the installed kit actually ships. -->
+    <UmdfVersionMajor>2</UmdfVersionMajor>
+    <UmdfVersionMinor Condition="'$(UmdfVersionMinor)' == ''">33</UmdfVersionMinor>
     <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
     <UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
   </PropertyGroup>
