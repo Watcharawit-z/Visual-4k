@@ -2,16 +2,21 @@
 ; Visual4kDisplay.inf -- indirect display driver for the Visual-4k compositor.
 ;
 ; Installs a root-enumerated software device; there is no hardware to bind to.
-; The device is created by:
-;     devcon install Visual4kDisplay.inf Root\Visual4kDisplay
-; or, without devcon:
-;     pnputil /add-driver Visual4kDisplay.inf /install
-; followed by adding a "Legacy hardware" device from Device Manager.
 ;
-; The driver is unsigned as built. Windows will refuse to load it until either
-; test signing is enabled (bcdedit /set testsigning on, then reboot) or the
-; binary is signed with a certificate the machine trusts. See
-; docs/BUILD-WINDOWS.md.
+; Written without the WDK's stamping tokens ($ARCH$, $UMDFVERSION$). Those are
+; substituted by the WDK's INF packaging target, which this project does not
+; use, so a token that survives into the shipped file makes inf2cat reject the
+; package with "does not have NTAMD64 decorated model sections" -- an error
+; that points at the architecture rather than at the missing substitution.
+;
+; Install with:
+;     pnputil /add-driver Visual4kDisplay.inf /install
+; then create the device from Device Manager (Add legacy hardware), or with
+; devcon if you have the WDK:
+;     devcon install Visual4kDisplay.inf Root\Visual4kDisplay
+;
+; The driver must be signed and test signing must be on, or Windows refuses to
+; load it with code 52. See docs/GETTING-STARTED.md.
 
 [Version]
 Signature   = "$WINDOWS NT$"
@@ -23,11 +28,11 @@ DriverVer   = 01/01/2025,1.0.0.0
 PnpLockDown = 1
 
 [Manufacturer]
-%ManufacturerName% = Standard,NT$ARCH$.10.0...16299
+%ManufacturerName% = Standard,NTamd64.10.0...16299
 
 ; 16299 is the first build with IddCx; declaring it stops the driver from
 ; installing on releases where the class extension does not exist.
-[Standard.NT$ARCH$.10.0...16299]
+[Standard.NTamd64.10.0...16299]
 %DeviceName% = Visual4kDisplay_Install, Root\Visual4kDisplay
 
 [SourceDisksFiles]
@@ -37,36 +42,55 @@ Visual4kDisplay.dll = 1
 1 = %DiskName%
 
 [DestinationDirs]
-DefaultDestDir = 13   ; the driver store package directory
+UMDriverCopy = 13   ; the driver store package directory
 
-[Visual4kDisplay_Install]
+[Visual4kDisplay_Install.NT]
 CopyFiles = UMDriverCopy
 
-[Visual4kDisplay_Install.hw]
+[Visual4kDisplay_Install.NT.hw]
 AddReg = Visual4kDisplay_HardwareDeviceSettings
 
+; IndirectKmd is the kernel-mode half of the indirect display stack. Without
+; this filter the device installs and then does nothing at all.
 [Visual4kDisplay_HardwareDeviceSettings]
 HKR,, "UpperFilters", %REG_MULTI_SZ%, "IndirectKmd"
 
-[Visual4kDisplay_Install.Services]
-AddService = ,2   ; a UMDF driver owns no kernel service
+[Visual4kDisplay_Install.NT.Services]
+AddService = WUDFRd, 0x000001fa, WUDFRD_ServiceInstall
 
-[Visual4kDisplay_Install.wdf]
-UmdfService              = Visual4kDisplay, Visual4kDisplay_Install
-UmdfServiceOrder         = Visual4kDisplay
+[WUDFRD_ServiceInstall]
+DisplayName   = %WudfRdDisplayName%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %12%\WUDFRd.sys
+
+[Visual4kDisplay_Install.NT.Wdf]
+UmdfService                = Visual4kDisplay, Visual4kDisplay_Service
+UmdfServiceOrder           = Visual4kDisplay
 UmdfKernelModeClientPolicy = AllowKernelModeClients
-UmdfFileObjectPolicy     = AllowNullAndUnknownFileObjects
-UmdfFsContextUsePolicy   = CannotUseFsContexts
+UmdfFileObjectPolicy       = AllowNullAndUnknownFileObjects
+UmdfFsContextUsePolicy     = CannotUseFsContexts
 
-[Visual4kDisplay_Install.Wdf]
-UmdfLibraryVersion = $UMDFVERSION$
+; The service section is separate from the install section on purpose: naming
+; both the same makes them a single section, and the UMDF loader then reads
+; install directives as service settings.
+;
+; UmdfExtensions names the IddCx version this driver is written against.
+; IddCx0102 is the baseline every IddCx-capable Windows provides, and the
+; driver only uses calls present in it, so asking for a newer surface would
+; narrow compatibility for nothing.
+[Visual4kDisplay_Service]
+UmdfLibraryVersion = 2.33.0
 ServiceBinary      = %13%\Visual4kDisplay.dll
+UmdfExtensions     = IddCx0102
 
 [UMDriverCopy]
 Visual4kDisplay.dll
 
 [Strings]
-ManufacturerName = "Visual-4k"
-DiskName         = "Visual-4k Installation Disk"
-DeviceName       = "Visual-4k Virtual Display"
-REG_MULTI_SZ     = 0x00010000
+ManufacturerName   = "Visual-4k"
+DiskName           = "Visual-4k Installation Disk"
+DeviceName         = "Visual-4k Virtual Display"
+WudfRdDisplayName  = "Windows Driver Foundation - User-mode Driver Framework Reflector"
+REG_MULTI_SZ       = 0x00010000
