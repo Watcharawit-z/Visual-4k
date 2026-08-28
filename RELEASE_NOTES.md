@@ -1,81 +1,86 @@
-Extract the zip and double-click **Visual4k-Setup.exe**. That is the whole
-procedure.
+The virtual display device installed correctly in v0.1.4 and v0.1.5, and then
+failed to start. This release fixes the reason.
 
-This is v0.1.4 plus one hardening change to the step most likely to fail in a
-way that misleads you.
+## What was wrong
 
-## What changed since v0.1.4
+Reported from a real machine, and every step of the install had succeeded:
 
-Setup recognised the new virtual display only by its adapter description
-matching "Visual-4k". Nothing guarantees Windows describes the adapter with the
-name from the INF, and if it does not, setup would have reported that no
-virtual display appeared. That reads as the driver having failed, when in fact
-the device installed correctly and only the name was unexpected -- and it would
-have sent both of us looking in entirely the wrong place.
+    == Installing the virtual display
+      trusted in LocalMachine\Root
+      trusted in LocalMachine\TrustedPublisher
+      driver package staged in the driver store
+      device node created
+      driver bound to the device
 
-It now identifies the display four ways, in descending confidence:
+    == Setting up the displays
+    The driver installed, but no virtual display appeared.
 
-1. The adapter's description.
-2. The monitor's description, which Windows reads out of the EDID the driver
-   reports, and which carries the same name.
-3. Whichever display is attached now but was not attached before the device was
-   created. This needs no name at all, so nothing about how Windows chooses to
-   describe the device can defeat it.
-4. Failing all of that, it lists the attached displays and asks. Someone
-   looking at their own monitors can pick out the entry they do not recognise
-   in one keystroke, where the program cannot.
+Windows knew exactly why:
 
-The failure message, if it still gets there, now names **code 52** and says
-what it means: Windows refused the signature, which means test signing is not
-actually on yet.
+    Status  : Error
+    Problem : CM_PROB_FAILED_ADD
+
+`FAILED_ADD` means the driver *loaded* and its `EvtDeviceAdd` returned a
+failure. That rules out the signature, the INF, and test signing, and points
+squarely at the driver's own code.
+
+The build was compiling the driver for whichever IddCx version the build
+machine happened to have installed -- 1.9 -- while the INF asked Windows to
+load `IddCx0102`, version 1.2. Those version macros decide the size and layout
+of `IDD_CX_CLIENT_CONFIG`. So the driver handed the 1.2 class extension a
+structure it did not recognise, `IddCxDeviceInitConfig` refused it, and
+`EvtDeviceAdd` returned that refusal.
+
+Both halves were individually correct. Nothing in the build could see the
+disagreement, which is why every release so far was green.
+
+The version is now pinned to match the INF, and a check fails the build if the
+two ever diverge again.
+
+## Setup now says why, itself
+
+The message above sent you to Device Manager to find a code Windows had
+already recorded. Setup now reads it through `CM_Get_DevNode_Status` and prints
+what it means -- that a driver refused its own device, that a signature was
+rejected because test signing is not really on, that the registry entry is
+damaged and needs option 3 first. Had it done that from the start, diagnosing
+this would have been one message instead of three.
+
+## If you installed v0.1.4 or v0.1.5
+
+Remove the broken device first: run the setup program you already have, choose
+**3**, and answer **n** when it offers to turn test signing off, since you will
+want it again in a moment. Then run this version and choose **1**.
 
 ## What the setup program does
 
-One executable, no dependencies, nothing to install first:
+Extract the zip, double-click **Visual4k-Setup.exe**, choose 1.
 
-- Asks for administrator rights itself, through an embedded manifest -- a
-  double-click raises the UAC prompt rather than failing at the first step.
+- Asks for administrator rights itself; a double-click raises the UAC prompt.
 - Trusts the build's signing certificate in both machine stores.
-- Explains what test signing costs before turning it on, asks, and offers the
-  restart. (Run setup again after the restart; it picks up where it left off.)
-- Stages the driver **and creates the device**, through the same SetupAPI calls
-  devcon makes. This is the step that previously required either the 90-minute
-  WDK install or six passes through Device Manager's "Add legacy hardware"
-  wizard, because a root-enumerated driver has no hardware to bind to and the
-  device node has to be conjured before Windows will load it.
+- Explains what test signing costs, asks, and offers the restart. Run setup
+  again afterwards and it carries on from where it stopped.
+- Stages the driver and creates the device, through the same SetupAPI calls
+  devcon makes -- no WDK, no Device Manager wizard.
 - Sets the virtual display to 3840x2160, starts the compositor, and only then
-  moves the desktop onto the virtual display.
+  moves the desktop onto it, so your panel is never showing nothing. If the
+  compositor fails to start, the desktop does not move at all.
+- Counts down 20 seconds and puts the displays back if you do not confirm.
+  Windows' own 15-second revert is a feature of the Settings app, not of the
+  API a program calls, so that safety net had to be built rather than assumed.
 - Removes all of it again, test signing included, from the same menu.
-
-## The order of those last steps is the point
-
-The compositor is drawing the virtual display onto your panel *before* the
-desktop moves there, so the panel is never showing nothing. If the compositor
-fails to start, setup does not move the desktop at all.
-
-And the confirmation countdown is the program's own, deliberately. The
-15-second "Keep these changes?" revert people know from Windows is a feature of
-the Settings app, not of the API a program calls: `ChangeDisplaySettingsEx`
-with `CDS_UPDATEREGISTRY` takes effect permanently the moment it is applied,
-with no timeout behind it. So setup captures the display layout first and puts
-it back if nobody confirms within 20 seconds.
 
 ## Still true
 
-**Nobody has completed an install yet, including the author.** Every piece
-compiles, the numerics are tested, and the compositor has run on real hardware
--- but no virtual display has ever appeared on any machine. These last two
-releases are about making the attempt cheap and its failures legible, not about
-having proven it works.
-
-Test signing must be on for Windows to load this driver at all. It is a boot
-setting that lowers the machine's security while it lasts. Setup says so, asks,
-and turns it back off when you remove Visual-4k.
+**Nobody has completed an install yet.** But the failure has moved: the device
+now installs, binds, and is expected to start, where before it was refused at
+the first call into the display stack. That is a different and much later
+failure than any previous release reached.
 
 ## Verified
 
-78 reference tests, 4 self-tests (tap-table parity against the Python
-reference, EDID, cursor decode, aspect fit), a type-check of every host source,
-a parse of every XML file in the tree, and a check that the setup program's
-elevation manifest really embedded -- since an exe missing it fails in a way
-the build cannot see.
+78 reference tests, 4 self-tests, a type-check of every host source, a parse of
+every XML file, a check that the compiled IddCx version matches the INF, and a
+check that the setup program's elevation manifest really embedded. The driver
+compiles clean against IddCx 1.2, which also confirms every callback it uses
+exists in that version.
