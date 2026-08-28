@@ -353,11 +353,23 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $out = "package/Visual4kDisplay"
+          # Absolute, because inf2cat resolves /driver: against its own
+          # working directory rather than the shell's.
+          $out = Join-Path (Get-Location) "package/Visual4kDisplay"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Get-ChildItem -Recurse driver/Visual4kDisplay/x64 |
-              Where-Object { $_.Extension -in ".dll",".inf",".pdb" } |
+              Where-Object { $_.Extension -in ".dll",".pdb" } |
               ForEach-Object { Copy-Item $_.FullName $out }
+
+          # The INF comes from the source tree, not the build output: we are
+          # not using the WDK's packaging target, so nothing copies it for us,
+          # and inf2cat rejects a folder with no INF at its root.
+          Copy-Item driver/Visual4kDisplay/Visual4kDisplay.inf $out
+
+          Write-Host "staged for signing:"
+          Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)" }
+          if (-not (Get-ChildItem $out -Filter *.inf)) { throw "no INF staged" }
+          if (-not (Get-ChildItem $out -Filter *.dll)) { throw "no DLL staged" }
 
           # Sign here rather than on the user's machine. inf2cat and signtool
           # ship with the WDK and the SDK, and requiring those to install a
