@@ -159,19 +159,24 @@ jobs:
           $p = Start-Process -FilePath $installer `
                              -ArgumentList "/quiet","/admin",$vsix.FullName `
                              -Wait -PassThru
-          Write-Host "VSIXInstaller exit code: $($p.ExitCode)"
-          # 1001 means "already installed", which is a success for our purposes.
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 1001) {
-            throw "VSIX install failed with $($p.ExitCode)"
-          }
+          # Deliberately not fatal. VSIXInstaller's exit codes do not
+          # distinguish "failed" from "this is already installed", and the
+          # windows-2022 image ships the WDK integration preinstalled, so
+          # judging the outcome here rejects a perfectly good runner. The
+          # next step checks the thing we actually care about -- whether the
+          # toolset is registered -- and that is the authority.
+          Write-Host "VSIXInstaller exit code: $($p.ExitCode) (informational)"
+
 
       - name: Verify the driver toolset is present
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          # Without this check MSBuild falls back to the ordinary C++ toolset
-          # and the failure surfaces as a missing wdf.h, which sends you
-          # looking for the WDK headers instead of the integration.
+          # The authoritative check, and the reason the VSIX step does not
+          # judge its own exit code. Without this, MSBuild falls back to the
+          # ordinary C++ toolset and the failure surfaces much later as a
+          # missing wdf.h, which sends you looking for the WDK headers
+          # instead of the integration.
           $toolsets = Get-ChildItem `
               "C:\Program Files*\Microsoft Visual Studio\*\*\MSBuild\Microsoft\VC\*\Platforms\x64\PlatformToolsets" `
               -Directory -ErrorAction SilentlyContinue
