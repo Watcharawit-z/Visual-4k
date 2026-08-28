@@ -16,7 +16,11 @@
 
 #pragma once
 
+// Include order is not stylistic here. UMDF builds define UMDF_USING_NTSTATUS,
+// and wudfwdm.h is what supplies the NTSTATUS surface that wdf.h and iddcx.h
+// then assume; pulling wdf.h in first fails on types that look unrelated.
 #include <windows.h>
+#include <wudfwdm.h>
 #include <wdf.h>
 #include <iddcx.h>
 

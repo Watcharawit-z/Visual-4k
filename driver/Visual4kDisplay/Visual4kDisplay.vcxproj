@@ -62,6 +62,24 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
 
   <PropertyGroup>
+    <!-- WDF include and library directories, stated explicitly.
+
+         The WDK's own toolset is supposed to derive these, and on this project
+         it does not: with PlatformToolset=WindowsUserModeDriver10.0,
+         DriverType=UMDF, a correct WDKContentRoot and UmdfVersionMajor/Minor
+         all set, MSBuild still resolved an IncludePath with no WDF entry, and
+         every build failed on wdf.h. Rather than keep guessing at which
+         property the kit wants, point at the directories directly: they are
+         a documented, stable layout, and this works whether or not the WDK's
+         MSBuild integration is behaving.
+
+         Overridable so CI can pass the version the installed kit ships. -->
+    <Visual4kKitRoot Condition="'$(Visual4kKitRoot)' == ''">$(WDKContentRoot)</Visual4kKitRoot>
+    <Visual4kKitRoot Condition="'$(Visual4kKitRoot)' == ''">C:\Program Files (x86)\Windows Kits\10\</Visual4kKitRoot>
+    <Visual4kUmdfVersion Condition="'$(Visual4kUmdfVersion)' == ''">$(UmdfVersionMajor).$(UmdfVersionMinor)</Visual4kUmdfVersion>
+    <Visual4kWdfInclude>$(Visual4kKitRoot)Include\wdf\umdf\$(Visual4kUmdfVersion)</Visual4kWdfInclude>
+    <Visual4kWdfLib>$(Visual4kKitRoot)Lib\wdf\umdf\x64\$(Visual4kUmdfVersion)</Visual4kWdfLib>
+
     <!-- The INF is signed together with the binary; without a catalog the
          package installs but the driver refuses to load with code 52. -->
     <EnableInf2cat>true</EnableInf2cat>
@@ -77,8 +95,11 @@
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <AdditionalIncludeDirectories>
+        $(Visual4kWdfInclude);%(AdditionalIncludeDirectories)
+      </AdditionalIncludeDirectories>
       <PreprocessorDefinitions>
-        _UNICODE;UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)
+        _UNICODE;UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;UMDF_USING_NTSTATUS;UMDF_VERSION_MAJOR=$(UmdfVersionMajor);UMDF_VERSION_MINOR=$(UmdfVersionMinor);%(PreprocessorDefinitions)
       </PreprocessorDefinitions>
       <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebugDLL</RuntimeLibrary>
       <RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreadedDLL</RuntimeLibrary>
@@ -86,8 +107,11 @@
     <Link>
       <!-- IddCx.lib is the class extension; avrt.lib is for the swap-chain
            thread's MMCSS registration. -->
+      <AdditionalLibraryDirectories>
+        $(Visual4kWdfLib);%(AdditionalLibraryDirectories)
+      </AdditionalLibraryDirectories>
       <AdditionalDependencies>
-        IddCx.lib;d3d11.lib;dxgi.lib;avrt.lib;%(AdditionalDependencies)
+        WdfDriverStubUm.lib;IddCx.lib;d3d11.lib;dxgi.lib;avrt.lib;%(AdditionalDependencies)
       </AdditionalDependencies>
     </Link>
     <Inf>

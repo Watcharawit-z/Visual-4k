@@ -249,6 +249,7 @@ jobs:
           msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
                   /p:Configuration=Release /p:Platform=x64 `
                   /p:UmdfVersionMinor=$minor `
+                  /p:Visual4kUmdfVersion=2.$minor `
                   /v:normal /p:SignMode=Off
           if ($LASTEXITCODE -ne 0) { throw "driver build failed" }
 
