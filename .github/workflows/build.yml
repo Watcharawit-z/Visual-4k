@@ -438,7 +438,22 @@ jobs:
           # exactly this way: 1.2 macros, 1.2 in the INF, and whatever stub the
           # kit happened to provide. The sweep left that combination out, which
           # is why it swept past the one answer it was looking for.
-          $newestLib = $versionDirs[-1].Group | Select-Object -First 1
+          # Deliberately the stub the releases that DID get past
+          # IddCxDeviceInitConfig were built against, which is 1.9 rather than
+          # 1.10.
+          #
+          # Those builds picked the library by sorting full paths as text and
+          # taking the last, and "1.9" sorts above "1.10" because '9' beats
+          # '1'. Sorting numerically instead -- which reads as the obvious
+          # correction -- quietly changed which stub the 1.2 package links, and
+          # that is the only thing that differs before the call that now fails.
+          # The accident was load-bearing.
+          $stubLib = $iddcxLibs |
+                     Where-Object { $_.FullName -match '\\x64\\' } |
+                     Where-Object { $_.Directory.Name -match '^\d+\.\d+$' } |
+                     Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $stubLib) { throw "no x64 IddCx stub for the 1.2 package" }
+          $newestLib = $stubLib
           Write-Host "=== building for IddCx 1.2 (stub from $($newestLib.Directory.Name)) ==="
 
           python tools\stamp-driverver.py --iddcx "1.2"
