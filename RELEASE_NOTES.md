@@ -1,97 +1,72 @@
-Two fixes to the install that failed last time, and one new thing that gives
-back the sharpness supersampling takes from text.
+The driver now tells you why it failed, instead of leaving Windows to say only
+that it did. Plus a second version mismatch, of exactly the kind that was fixed
+last time in only one of the two places it existed.
 
-## The install should actually update now
+## Why v0.1.7 still failed
 
-v0.1.6 carried a fix for the IddCx version mismatch, and there is a good chance
-Windows never loaded it. The setup program reported:
+The install was clean -- `device node created` rather than `already exists`, on
+a freshly stamped DriverVer -- which proves the IddCx fix from v0.1.6 was
+genuinely loaded this time. It was not the cause. Problem code 31 again.
 
-    device already exists; updating its driver
-    driver bound to the device
+The identical mistake was sitting one line away in the same file:
 
-and the device stayed broken in exactly its old way.
+    INF:  UmdfLibraryVersion = 2.33.0
+    CI:   built against whatever UMDF the build machine had, which is 2.35
 
-`DriverVer` was the literal string `01/01/2025,1.0.0.0` in every build ever
-made. Windows ranks driver packages, and one that is not newer than what the
-driver store already holds does not have to win -- so installing over a
-previous version could leave the earlier binary bound to the device. An update
-that updates nothing, reported as success.
+Same class of bug as the IddCx one, same invisibility to the build, same
+symptom. It got fixed for IddCx and left in place for UMDF because only one of
+the two was looked at. Both are pinned now, and `check-driver-versions.py`
+checks both rather than one.
 
-Every build now stamps its own version.
+## The driver records what it does
 
-**If you have a previous version installed, remove it first**: run the setup
-program you already have, choose **3**, answer **n** when it offers to turn
-test signing off. Then install this one with **1**.
+That fix is still a guess, and it is the third. So this release stops the
+guessing.
 
-## Setup diagnoses before it asks
+Windows reports a failed `EvtDeviceAdd` as problem code 31 and nothing more.
+That names the callback but not the call inside it, and there are three
+candidates: `IddCxDeviceInitConfig`, `WdfDeviceCreate`, `IddCxDeviceInitialize`.
+Every round so far has been an attempt to infer from outside which one it was,
+at the cost of a release and an install on someone else's machine, and two of
+those inferences were wrong.
 
-When no display appeared, v0.1.6 offered the list of attached displays and
-asked which was the virtual one -- putting your own two monitors in front of
-you and asking which was the one that was not there. Windows had recorded the
-actual reason the whole time.
+The driver now writes down each step and its status code, to the debugger
+stream and to a registry value that outlives the failure. Setup creates that
+key before the device exists -- with an ACL permitting the service accounts a
+driver host runs under, since the driver cannot create it itself -- and prints
+what it finds when no display appears:
 
-It now reads the device's problem code first and says what it means, and offers
-the list only when the driver is genuinely running, which is the one case a
-person can settle and the program cannot.
+    What the driver itself recorded:
+      last step : IddCxDeviceInitConfig
+      status    : 0xC000000D
+      at        : 2026-09-01 06:40:12Z
 
-## Subpixel resolve: --subpixel
+Whatever happens next, it will be a fact rather than a fourth guess. Including
+the case where nothing was recorded, which is also an answer: it means the
+failure happens before any of the driver's own code runs.
 
-An LCD pixel is three emitters side by side, red a third of a pixel left of
-centre and blue a third right. ClearType makes small text legible by computing
-how much of a glyph covers each *emitter* rather than each pixel, which is
-three times the horizontal resolution for free.
+Recording success matters as much as failure. A record ending at
+`EvtDeviceAdd complete` separates a driver that never ran from one that ran
+correctly and still produced no display.
 
-Every ordinary resolve averages that away: one value per output pixel, sent to
-all three emitters. That is the specific reason a supersampled desktop softens
-text that native rendering keeps crisp, and NVIDIA's DSR does not address it
-either.
+## If you have a previous version installed
 
-So sample each channel where its emitter actually is. Measured on vertical
-stems at glyph widths and sub-pixel phases, with coverage computed analytically
-so the ground truth carries no sampling error at all:
+Remove it first: run the setup program you already have, choose **3**, answer
+**n** when it offers to turn test signing off. Then install this one with **1**.
 
-                                    subpixel PSNR    luma PSNR
-    native 1440p, greyscale AA           17.69 dB          inf
-    4K -> plain resolve                  17.46 dB     30.22 dB
-    4K -> subpixel resolve               20.53 dB     26.68 dB
+## Also still here
 
-+3.07 dB of effective horizontal resolution, which is seven times what the
-entire choice of filter was worth. The cost in luminance accuracy is real and
-is the known trade of subpixel rendering.
-
-Five fringe-reduction filters were tried and every one scored worse. That
-result is in the benchmark with a warning attached: the ground truth there is
-ideal per-emitter coverage, so an unfiltered resolve is closest to it by
-construction, and whether a coloured edge is objectionable to *look at* is not
-something the measurement can see.
-
-**Off by default**, because it buys resolution with colour. A panel whose
-subpixels are not in RGB vertical stripes gets fringing instead of detail.
-
-## What was measured about NVIDIA DSR along the way
-
-Worth stating, since it decides whether any of this is worth installing:
-
-- The DSR smoothness default of 33% renders about 23% softer than ground truth.
-  Lower it. Lower is sharper, in both DSR and DLDSR.
-- **The oversampling ratio matters roughly ten times more than the filter.**
-  1.50x to 2.00x is worth +4.3 dB; every filter question put together is worth
-  about 0.4 dB. On a 1440p panel that means DSR 4.00x (5120x2880), which DLDSR
-  cannot reach -- it offers only 1.33x and 1.5x.
-- At 1.50x, a well-tuned Gaussian slightly beats this project's own filter.
-  There is no headroom left in filter design at that ratio.
-
-Subpixel resolve is the one thing here that a display driver's resolve does not
-already do.
-
-## Still true
-
-**Nobody has completed an install yet.** The device installs and binds; whether
-it starts is what this release makes testable for the first time, since until
-now the fix for it may never have been loaded.
+`--subpixel` on the compositor, which resolves each colour channel at its own
+emitter's position and recovers about 3 dB of the horizontal detail in text
+that an ordinary resolve averages away. RGB-stripe panels only; off by default.
 
 ## Verified
 
-78 reference tests, 4 self-tests, a type-check of every host source, a parse of
-every XML file, a check that the compiled IddCx version matches the INF, and a
-check that the setup program's elevation manifest really embedded.
+78 reference tests, 4 self-tests, a type-check of every host source *and the
+driver's diagnostics* -- that file broke the build once, on errors a Linux
+compiler would have caught in seconds, so it is checked there now -- a parse of
+every XML file, and a check that both declared framework versions match the
+INF.
+
+**Nobody has completed an install yet.** But for the first time, a failure will
+name its own cause.
