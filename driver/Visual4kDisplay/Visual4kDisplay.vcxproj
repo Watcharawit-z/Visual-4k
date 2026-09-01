@@ -156,12 +156,14 @@
   </ItemDefinitionGroup>
 
   <ItemGroup>
+    <ClCompile Include="Diagnostics.cpp" />
     <ClCompile Include="Driver.cpp" />
     <ClCompile Include="Edid.cpp" />
     <ClCompile Include="SwapChainProcessor.cpp" />
   </ItemGroup>
 
   <ItemGroup>
+    <ClInclude Include="Diagnostics.h" />
     <ClInclude Include="Driver.h" />
     <ClInclude Include="Edid.h" />
   </ItemGroup>

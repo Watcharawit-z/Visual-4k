@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include "Diagnostics.h"
+
 namespace visual4k {
 namespace {
 
@@ -259,7 +261,12 @@ NTSTATUS EvtDeviceAdd(WDFDRIVER /*driver*/, PWDFDEVICE_INIT deviceInit)
     config.EvtIddCxMonitorUnassignSwapChain = EvtMonitorUnassignSwapChain;
     config.EvtIddCxAdapterCommitModes = EvtAdapterCommitModes;
 
+    // Each step records its outcome. Windows reports a failed EvtDeviceAdd as
+    // problem code 31 and nothing else, which names the callback but not the
+    // call inside it, and there are three candidates. Two rounds were spent
+    // guessing at that from the outside before this was added.
     NTSTATUS status = IddCxDeviceInitConfig(deviceInit, &config);
+    RecordStage(L"IddCxDeviceInitConfig", status);
     if (!NT_SUCCESS(status))
         return status;
 
@@ -271,15 +278,18 @@ NTSTATUS EvtDeviceAdd(WDFDRIVER /*driver*/, PWDFDEVICE_INIT deviceInit)
 
     WDFDEVICE device = nullptr;
     status = WdfDeviceCreate(&deviceInit, &attributes, &device);
+    RecordStage(L"WdfDeviceCreate", status);
     if (!NT_SUCCESS(status))
         return status;
 
     new (GetDeviceContext(device)) DeviceContext{};
 
     status = IddCxDeviceInitialize(device);
+    RecordStage(L"IddCxDeviceInitialize", status);
     if (!NT_SUCCESS(status))
         return status;
 
+    RecordStage(L"EvtDeviceAdd complete", STATUS_SUCCESS);
     return STATUS_SUCCESS;
 }
 

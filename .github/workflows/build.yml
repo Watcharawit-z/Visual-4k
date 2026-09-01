@@ -64,8 +64,8 @@ jobs:
       # The version the driver is compiled for and the version its INF asks
       # Windows to load have to agree, and when they did not the failure was
       # invisible to the build and cost a full install cycle to find.
-      - name: Check the IddCx version is consistent
-        run: python3 tools/check-iddcx-version.py
+      - name: Check the driver's declared versions are consistent
+        run: python3 tools/check-driver-versions.py
 
       - name: Parse the PowerShell scripts
         shell: pwsh
@@ -295,17 +295,21 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Pin the UMDF minor version to what this kit actually ships rather
-          # than to the project's default, so a kit upgrade on the runner image
-          # cannot silently break the WDF include path again.
-          $umdf = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Include\wdf\umdf" `
-                      -Directory -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Name -match '^2\.(\d+)$' } |
-                  Sort-Object { [int]($_.Name -replace '^2\.', '') } -Descending |
-                  Select-Object -First 1
-          if (-not $umdf) { throw "no UMDF 2.x include directory under the WDK" }
-          $minor = $umdf.Name -replace '^2\.', ''
-          Write-Host "using UMDF 2.$minor"
+          # The UMDF version comes from the project file, which matches the
+          # INF, and is NOT read off the kit.
+          #
+          # It used to be. The runner ships UMDF 2.35, so the driver was built
+          # and linked against 2.35 while the INF told the loader to bind
+          # 2.33.0 -- the identical mistake that was found and fixed for IddCx,
+          # left in place here because only one of the two was looked at.
+          #
+          # The kit does ship the older versions alongside the newest, which is
+          # the point of versioning them, so building for 2.33 needs nothing
+          # installed beyond what is already here.
+          $wdfRoot = "C:\Program Files (x86)\Windows Kits\10\Include\wdf\umdf"
+          Write-Host "UMDF versions this kit ships:"
+          Get-ChildItem $wdfRoot -Directory -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "  $($_.Name)" }
 
           # IddCx is a class extension shipped with the WDK, and where its
           # header lands varies between kits. Locate it rather than assuming
@@ -363,8 +367,6 @@ jobs:
 
           msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
                   /p:Configuration=Release /p:Platform=x64 `
-                  /p:UmdfVersionMinor=$minor `
-                  /p:Visual4kUmdfVersion=2.$minor `
                   "/p:Visual4kIddCxInclude=$iddcxInclude" `
                   "/p:Visual4kIddCxLib=$iddcxLibDir" `
                   "/p:Visual4kIddCxLibFile=$iddcxLibFile" `

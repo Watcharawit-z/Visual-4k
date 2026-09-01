@@ -4,6 +4,7 @@
 #include <setupapi.h>
 #include <newdev.h>
 #include <cfgmgr32.h>
+#include <sddl.h>
 
 #include <algorithm>
 #include <cstring>
@@ -164,6 +165,79 @@ DeviceStatus QueryVirtualDisplayStatus()
 
     SetupDiDestroyDeviceInfoList(set);
     return status;
+}
+
+// Must match Diagnostics.h in the driver.
+const wchar_t kDiagnosticsKey[] = L"SOFTWARE\\Visual-4k";
+
+bool PrepareDiagnosticsKey()
+{
+    HKEY key = nullptr;
+    DWORD disposition = 0;
+    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, kDiagnosticsKey, 0, nullptr,
+                        REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS | WRITE_DAC,
+                        nullptr, &key, &disposition) != ERROR_SUCCESS)
+        return false;
+
+    // Full access for SYSTEM and Administrators, and for the two service
+    // accounts a UMDF host can run under. Scoped to this one key, which holds
+    // nothing but a failure message.
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    const wchar_t* sddl = L"D:(A;;KA;;;SY)(A;;KA;;;BA)(A;;KA;;;LS)(A;;KA;;;NS)";
+    bool ok = false;
+    if (ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, SDDL_REVISION_1, &descriptor, nullptr)) {
+        BOOL present = FALSE;
+        BOOL defaulted = FALSE;
+        PACL acl = nullptr;
+        if (GetSecurityDescriptorDacl(descriptor, &present, &acl, &defaulted) &&
+            present) {
+            ok = RegSetKeySecurity(key, DACL_SECURITY_INFORMATION,
+                                   descriptor) == ERROR_SUCCESS;
+        }
+        LocalFree(descriptor);
+    }
+
+    RegCloseKey(key);
+    return ok;
+}
+
+DriverRecord ReadDriverRecord()
+{
+    DriverRecord record;
+
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kDiagnosticsKey, 0, KEY_QUERY_VALUE,
+                      &key) != ERROR_SUCCESS)
+        return record;
+
+    wchar_t text[256] = {};
+    DWORD size = sizeof(text);
+    DWORD type = 0;
+    if (RegQueryValueExW(key, L"LastStage", nullptr, &type,
+                         reinterpret_cast<LPBYTE>(text), &size) == ERROR_SUCCESS &&
+        type == REG_SZ) {
+        record.present = true;
+        record.stage = text;
+    }
+
+    DWORD status = 0;
+    size = sizeof(status);
+    if (RegQueryValueExW(key, L"LastStatus", nullptr, &type,
+                         reinterpret_cast<LPBYTE>(&status), &size) == ERROR_SUCCESS &&
+        type == REG_DWORD) {
+        record.status = status;
+    }
+
+    size = sizeof(text);
+    if (RegQueryValueExW(key, L"LastTime", nullptr, &type,
+                         reinterpret_cast<LPBYTE>(text), &size) == ERROR_SUCCESS &&
+        type == REG_SZ) {
+        record.time = text;
+    }
+
+    RegCloseKey(key);
+    return record;
 }
 
 Result InstallVirtualDisplay(const std::wstring& infPath, bool* rebootRequired)

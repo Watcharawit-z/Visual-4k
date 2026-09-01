@@ -43,6 +43,25 @@ struct DeviceStatus {
 
 DeviceStatus QueryVirtualDisplayStatus();
 
+// Creates the key the driver records its progress into, with an ACL that lets
+// the driver's host process write to it.
+//
+// The driver runs in a service host, not as the user, so it cannot create a
+// key under HKLM\SOFTWARE itself. Setup can, and does it before the device is
+// created so that the very first start attempt is already being recorded.
+bool PrepareDiagnosticsKey();
+
+// What the driver last recorded, empty if it recorded nothing. "Nothing" is
+// itself informative: it means the driver's EvtDeviceAdd was never entered.
+struct DriverRecord {
+    bool present = false;
+    std::wstring stage;
+    uint32_t status = 0;
+    std::wstring time;
+};
+
+DriverRecord ReadDriverRecord();
+
 // Removes every device with our hardware ID, then deletes the package from the
 // driver store.
 Result RemoveVirtualDisplay(const std::wstring& infPath, bool* rebootRequired);

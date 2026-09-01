@@ -367,6 +367,13 @@ bool StepInstallDriver(const Paths& paths)
         Line(L"  signed by something this machine already trusts.", Tone::Warn);
     }
 
+    // Before the device exists, so the driver's very first start attempt is
+    // already being recorded.
+    if (!PrepareDiagnosticsKey()) {
+        Line(L"  could not prepare the diagnostics key; a failure will report "
+             L"less detail", Tone::Warn);
+    }
+
     bool rebootRequired = false;
     const Result installed = InstallVirtualDisplay(paths.inf, &rebootRequired);
     if (!installed.ok) {
@@ -420,6 +427,28 @@ bool FindVirtualDisplayOrExplain(DisplayInfo* out,
         Line(L"  problem code " + std::to_wstring(status.problemCode), Tone::Bad);
         if (!status.explanation.empty())
             Line(L"  " + status.explanation);
+    }
+
+    // Windows says the callback failed. The driver says which call inside it
+    // failed and with what status, which is the difference between a fix and
+    // another guess.
+    const DriverRecord record = ReadDriverRecord();
+    Blank();
+    if (record.present) {
+        wchar_t code[32];
+        std::swprintf(code, 32, L"0x%08lX", static_cast<unsigned long>(record.status));
+        Line(L"What the driver itself recorded:", Tone::Warn);
+        Line(L"  last step : " + record.stage);
+        Line(L"  status    : " + std::wstring(code));
+        if (!record.time.empty())
+            Line(L"  at        : " + record.time);
+        Blank();
+        Line(L"Send those three lines; they name the failing call exactly.");
+    } else {
+        Line(L"The driver recorded nothing, which means its EvtDeviceAdd was",
+             Tone::Warn);
+        Line(L"never entered: the failure is before the driver's own code runs.",
+             Tone::Warn);
     }
     return false;
 }
