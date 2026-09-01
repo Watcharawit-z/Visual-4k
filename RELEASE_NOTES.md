@@ -1,86 +1,97 @@
-The virtual display device installed correctly in v0.1.4 and v0.1.5, and then
-failed to start. This release fixes the reason.
+Two fixes to the install that failed last time, and one new thing that gives
+back the sharpness supersampling takes from text.
 
-## What was wrong
+## The install should actually update now
 
-Reported from a real machine, and every step of the install had succeeded:
+v0.1.6 carried a fix for the IddCx version mismatch, and there is a good chance
+Windows never loaded it. The setup program reported:
 
-    == Installing the virtual display
-      trusted in LocalMachine\Root
-      trusted in LocalMachine\TrustedPublisher
-      driver package staged in the driver store
-      device node created
-      driver bound to the device
+    device already exists; updating its driver
+    driver bound to the device
 
-    == Setting up the displays
-    The driver installed, but no virtual display appeared.
+and the device stayed broken in exactly its old way.
 
-Windows knew exactly why:
+`DriverVer` was the literal string `01/01/2025,1.0.0.0` in every build ever
+made. Windows ranks driver packages, and one that is not newer than what the
+driver store already holds does not have to win -- so installing over a
+previous version could leave the earlier binary bound to the device. An update
+that updates nothing, reported as success.
 
-    Status  : Error
-    Problem : CM_PROB_FAILED_ADD
+Every build now stamps its own version.
 
-`FAILED_ADD` means the driver *loaded* and its `EvtDeviceAdd` returned a
-failure. That rules out the signature, the INF, and test signing, and points
-squarely at the driver's own code.
+**If you have a previous version installed, remove it first**: run the setup
+program you already have, choose **3**, answer **n** when it offers to turn
+test signing off. Then install this one with **1**.
 
-The build was compiling the driver for whichever IddCx version the build
-machine happened to have installed -- 1.9 -- while the INF asked Windows to
-load `IddCx0102`, version 1.2. Those version macros decide the size and layout
-of `IDD_CX_CLIENT_CONFIG`. So the driver handed the 1.2 class extension a
-structure it did not recognise, `IddCxDeviceInitConfig` refused it, and
-`EvtDeviceAdd` returned that refusal.
+## Setup diagnoses before it asks
 
-Both halves were individually correct. Nothing in the build could see the
-disagreement, which is why every release so far was green.
+When no display appeared, v0.1.6 offered the list of attached displays and
+asked which was the virtual one -- putting your own two monitors in front of
+you and asking which was the one that was not there. Windows had recorded the
+actual reason the whole time.
 
-The version is now pinned to match the INF, and a check fails the build if the
-two ever diverge again.
+It now reads the device's problem code first and says what it means, and offers
+the list only when the driver is genuinely running, which is the one case a
+person can settle and the program cannot.
 
-## Setup now says why, itself
+## Subpixel resolve: --subpixel
 
-The message above sent you to Device Manager to find a code Windows had
-already recorded. Setup now reads it through `CM_Get_DevNode_Status` and prints
-what it means -- that a driver refused its own device, that a signature was
-rejected because test signing is not really on, that the registry entry is
-damaged and needs option 3 first. Had it done that from the start, diagnosing
-this would have been one message instead of three.
+An LCD pixel is three emitters side by side, red a third of a pixel left of
+centre and blue a third right. ClearType makes small text legible by computing
+how much of a glyph covers each *emitter* rather than each pixel, which is
+three times the horizontal resolution for free.
 
-## If you installed v0.1.4 or v0.1.5
+Every ordinary resolve averages that away: one value per output pixel, sent to
+all three emitters. That is the specific reason a supersampled desktop softens
+text that native rendering keeps crisp, and NVIDIA's DSR does not address it
+either.
 
-Remove the broken device first: run the setup program you already have, choose
-**3**, and answer **n** when it offers to turn test signing off, since you will
-want it again in a moment. Then run this version and choose **1**.
+So sample each channel where its emitter actually is. Measured on vertical
+stems at glyph widths and sub-pixel phases, with coverage computed analytically
+so the ground truth carries no sampling error at all:
 
-## What the setup program does
+                                    subpixel PSNR    luma PSNR
+    native 1440p, greyscale AA           17.69 dB          inf
+    4K -> plain resolve                  17.46 dB     30.22 dB
+    4K -> subpixel resolve               20.53 dB     26.68 dB
 
-Extract the zip, double-click **Visual4k-Setup.exe**, choose 1.
++3.07 dB of effective horizontal resolution, which is seven times what the
+entire choice of filter was worth. The cost in luminance accuracy is real and
+is the known trade of subpixel rendering.
 
-- Asks for administrator rights itself; a double-click raises the UAC prompt.
-- Trusts the build's signing certificate in both machine stores.
-- Explains what test signing costs, asks, and offers the restart. Run setup
-  again afterwards and it carries on from where it stopped.
-- Stages the driver and creates the device, through the same SetupAPI calls
-  devcon makes -- no WDK, no Device Manager wizard.
-- Sets the virtual display to 3840x2160, starts the compositor, and only then
-  moves the desktop onto it, so your panel is never showing nothing. If the
-  compositor fails to start, the desktop does not move at all.
-- Counts down 20 seconds and puts the displays back if you do not confirm.
-  Windows' own 15-second revert is a feature of the Settings app, not of the
-  API a program calls, so that safety net had to be built rather than assumed.
-- Removes all of it again, test signing included, from the same menu.
+Five fringe-reduction filters were tried and every one scored worse. That
+result is in the benchmark with a warning attached: the ground truth there is
+ideal per-emitter coverage, so an unfiltered resolve is closest to it by
+construction, and whether a coloured edge is objectionable to *look at* is not
+something the measurement can see.
+
+**Off by default**, because it buys resolution with colour. A panel whose
+subpixels are not in RGB vertical stripes gets fringing instead of detail.
+
+## What was measured about NVIDIA DSR along the way
+
+Worth stating, since it decides whether any of this is worth installing:
+
+- The DSR smoothness default of 33% renders about 23% softer than ground truth.
+  Lower it. Lower is sharper, in both DSR and DLDSR.
+- **The oversampling ratio matters roughly ten times more than the filter.**
+  1.50x to 2.00x is worth +4.3 dB; every filter question put together is worth
+  about 0.4 dB. On a 1440p panel that means DSR 4.00x (5120x2880), which DLDSR
+  cannot reach -- it offers only 1.33x and 1.5x.
+- At 1.50x, a well-tuned Gaussian slightly beats this project's own filter.
+  There is no headroom left in filter design at that ratio.
+
+Subpixel resolve is the one thing here that a display driver's resolve does not
+already do.
 
 ## Still true
 
-**Nobody has completed an install yet.** But the failure has moved: the device
-now installs, binds, and is expected to start, where before it was refused at
-the first call into the display stack. That is a different and much later
-failure than any previous release reached.
+**Nobody has completed an install yet.** The device installs and binds; whether
+it starts is what this release makes testable for the first time, since until
+now the fix for it may never have been loaded.
 
 ## Verified
 
 78 reference tests, 4 self-tests, a type-check of every host source, a parse of
 every XML file, a check that the compiled IddCx version matches the INF, and a
-check that the setup program's elevation manifest really embedded. The driver
-compiles clean against IddCx 1.2, which also confirms every callback it uses
-exists in that version.
+check that the setup program's elevation manifest really embedded.
