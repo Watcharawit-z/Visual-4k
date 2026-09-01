@@ -1,53 +1,54 @@
-Two things the last sweep proved, and the release that acts on both.
+This driver was written from a recollection of Microsoft's indirect display
+sample. This release compares it against the actual source, which turned up
+three differences -- all of them in or beside the function that was failing.
 
-## What v0.2.2 showed
+## What v0.2.3 proved before I opened the source
 
-    IddCx 1.10 .. 1.3    problem code 31
-                         the driver's own code did not run
+    IddCx 1.2:  reached IddCxDeviceInitConfig, 0xC000000D
 
-Not one of the seven entered `EvtDeviceAdd`. That rules out the missing
-callback from v0.2.2, and rules out configuration validation entirely: the DLL
-is not being loaded at all. Every package above 1.2 declares its own version in
-its INF and links that version's stub, and none of them load on this machine.
+At 1.2 that call used to succeed. The only change since was the
+`EvtIddCxDeviceIoControl` callback added in v0.2.2, on my inference that a
+mandatory callback was missing. The real sample sets seven callbacks and not
+that one -- exactly the seven this driver already had. The inference was wrong,
+and it broke the one version that worked. Removed.
 
-**IddCx 1.2 is the only version that has ever run here -- and the sweep never
-shipped it.** The kit provides no 1.2 import library, so the version loop
-skipped it. The earlier releases that *did* run were built with 1.2 macros, 1.2
-in the INF, and whatever stub the kit happened to provide. The sweep swept past
-the one answer it was looking for.
+## The difference that is almost certainly the original cause
 
-That combination is now built explicitly and shipped alongside the rest.
+    IDDCX_ENDPOINT_VERSION Version = {};
+    Version.Size = sizeof(Version);
+    Version.MajorVer = 1;
+    AdapterCaps.EndPointDiagnostics.pFirmwareVersion = &Version;
+    AdapterCaps.EndPointDiagnostics.pHardwareVersion = &Version;
 
-## The failure 1.2 actually had
+Both pointers were left null here. A required pointer left null is refused with
+`STATUS_INVALID_PARAMETER`, which names no parameter -- and from outside that
+is indistinguishable from a wrong structure size, which is exactly what the
+last several releases went hunting for. The size-probing added for that hunt is
+removed along with it.
 
-`IddCxAdapterInitAsync` refusing `IDDCX_ADAPTER_CAPS` with
-`STATUS_INVALID_PARAMETER`, naming no parameter, with every field matching
-Microsoft's sample. The one thing a sample cannot disagree about is the layout
-the header emits, and the class extension validates `Size` against the version
-it is operating as.
+## And one structural difference
 
-So the size is **offered rather than asserted**: the full compiled size first,
-then the size implied by the fields this driver actually sets, taking the first
-the extension accepts. Every attempt is recorded, so even total failure says
-what was tried and what each was refused with.
+The sample brings the adapter up in `EvtDeviceD0Entry` and sets no
+`PrepareHardware` callback at all. This driver called `IddCxAdapterInitAsync`
+from `PrepareHardware`. Moved.
 
-## Why this release should behave differently
+## What this says about the last several releases
 
-Both remaining unknowns were things only your machine could answer, and both
-were being guessed at from a build server:
+None of these three were findable by reasoning about the failure from the
+outside, and reasoning about it from the outside is what I kept doing. When the
+instrumentation named `IddCxAdapterInitAsync` as the failing call -- several
+releases ago -- the right next step was to open the sample, not to reconstruct
+it from memory and compare the code against my own reconstruction.
 
-    which extension version this Windows provides  ->  ship them all, 1.2 included
-    which structure layout the extension expects   ->  offer each, take the first accepted
-
-Neither is a guess any more.
+The instrumentation was right every time. I was slow to use it.
 
 ## Installing
 
 Straight over the previous version. Extract the zip, double-click
 **Visual4k-Setup.exe**, choose **1**.
 
-Failures scrolling past as it works through the packages are expected. Watch
-for `the display came up`.
+It still tries each shipped IddCx package newest first; watch for
+`the display came up`.
 
 ## The whole sequence
 
@@ -56,7 +57,8 @@ for `the display came up`.
     10, IddCxAdapterInitAsync      invalid parameter, at IddCx 1.2
     31, no record at all           IddCx 1.9 not present on the machine
     31, at all seven versions      the DLL never loaded: 1.2 was missing
-    ->                             1.2 shipped, layout negotiated
+    31, config refused at 1.2      a callback I added that should not exist
+    ->                             three differences from the real sample
 
 ## Also in here
 
