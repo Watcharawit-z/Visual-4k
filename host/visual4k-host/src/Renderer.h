@@ -43,6 +43,21 @@ struct RendererSettings {
     // panel. Off for the desktop, on for video. See docs/ALGORITHMS.md.
     bool linearResolve = false;
 
+    // Resolve each colour channel at the position of its own emitter.
+    //
+    // An LCD pixel is three emitters side by side, and ClearType makes small
+    // text legible by computing how much of a glyph covers each one. An
+    // ordinary resolve produces a single value per pixel and lights all three
+    // with it, which averages that structure away -- the reason a supersampled
+    // desktop softens text that native rendering keeps crisp.
+    //
+    // Measured on vertical stems at glyph widths this recovers about 3 dB of
+    // horizontal detail, at some cost in luminance accuracy; see
+    // reference/bench_subpixel.py. It buys resolution with colour, so on a
+    // panel whose subpixels are not in RGB vertical stripes it produces
+    // fringing instead of detail. Off by default for that reason.
+    bool subpixelResolve = false;
+
     // Fit the source inside the panel instead of stretching it to fill.
     //
     // The resolve maps the source onto the destination axis by axis, so a
@@ -104,7 +119,7 @@ private:
         uint32_t tapCount;
         uint32_t axis;
         uint32_t linearize;
-        uint32_t pad;
+        uint32_t subpixel;
         int32_t outputOffset[2];
         uint32_t pad2[2];
     };
@@ -191,10 +206,18 @@ private:
 
     ComPtr<ID3D11ShaderResourceView> hFirstTapSrv_;
     ComPtr<ID3D11ShaderResourceView> hWeightsSrv_;
+    // The horizontal tables again, shifted to the red and blue emitters. Built
+    // only for the subpixel resolve; null otherwise.
+    ComPtr<ID3D11ShaderResourceView> hFirstTapRedSrv_;
+    ComPtr<ID3D11ShaderResourceView> hWeightsRedSrv_;
+    ComPtr<ID3D11ShaderResourceView> hFirstTapBlueSrv_;
+    ComPtr<ID3D11ShaderResourceView> hWeightsBlueSrv_;
     ComPtr<ID3D11ShaderResourceView> vFirstTapSrv_;
     ComPtr<ID3D11ShaderResourceView> vWeightsSrv_;
 
     TapTable horizontalTaps_;
+    TapTable horizontalTapsRed_;
+    TapTable horizontalTapsBlue_;
     TapTable verticalTaps_;
 
     RendererSettings settings_;

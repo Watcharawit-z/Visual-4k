@@ -144,7 +144,7 @@ FitRect FitPreservingAspect(uint32_t srcWidth, uint32_t srcHeight,
 }
 
 TapTable BuildTapTable(uint32_t srcLength, uint32_t dstLength, Kernel kernel,
-                       double gaussianSigma)
+                       double gaussianSigma, double phase)
 {
     if (srcLength == 0 || dstLength == 0)
         throw std::invalid_argument("BuildTapTable: lengths must be >= 1");
@@ -162,7 +162,7 @@ TapTable BuildTapTable(uint32_t srcLength, uint32_t dstLength, Kernel kernel,
         // Pixel d covers [d, d+1) and is centred at d + 0.5, so it samples the
         // source at (d + 0.5) * scale in source *edge* coordinates. Half a
         // pixel of error here is the classic "sharp but subtly shifted" bug.
-        centres[d] = (static_cast<double>(d) + 0.5) * scale;
+        centres[d] = (static_cast<double>(d) + 0.5 + phase) * scale;
         lo[d] = static_cast<int64_t>(std::floor(centres[d] - kSupport + 0.5));
         hi[d] = static_cast<int64_t>(std::ceil(centres[d] + kSupport + 0.5));
         maxTaps = std::max(maxTaps, hi[d] - lo[d]);

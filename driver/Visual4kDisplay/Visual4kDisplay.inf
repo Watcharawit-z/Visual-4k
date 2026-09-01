@@ -24,7 +24,7 @@ Class       = Display
 ClassGuid   = {4d36e968-e325-11ce-bfc1-08002be10318}
 Provider    = %ManufacturerName%
 CatalogFile = Visual4kDisplay.cat
-DriverVer   = 01/01/2025,1.0.0.0
+DriverVer   = 01/01/2025,1.0.0.0   ; stamped by CI; see tools/stamp-driverver.py
 PnpLockDown = 1
 
 [Manufacturer]

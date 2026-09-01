@@ -14,6 +14,10 @@
 //     --linear                 resolve in linear light (video; see docs)
 //     --shaders <dir>          shader directory (default: .\shaders)
 //     --vsync <0|1>            default 1
+//     --subpixel               resolve each colour channel at its own emitter,
+//                              which recovers horizontal detail in text that
+//                              an ordinary resolve averages away. RGB-stripe
+//                              panels only; elsewhere it shows as fringing
 //     --no-cursor              do not composite the mouse pointer
 //     --stretch                fill the panel instead of preserving the
 //                              source's aspect ratio (letterboxing is the
@@ -152,6 +156,8 @@ bool ParseOptions(int argc, wchar_t** argv, Options* opt)
             opt->renderer.sharpnessStops = wcstof(v, nullptr);
         } else if (arg == L"--stretch") {
             opt->renderer.preserveAspect = false;
+        } else if (arg == L"--subpixel") {
+            opt->renderer.subpixelResolve = true;
         } else if (arg == L"--no-cursor") {
             opt->drawCursor = false;
         } else if (arg == L"--denoise") {

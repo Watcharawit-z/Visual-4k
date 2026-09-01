@@ -19,7 +19,13 @@ import numpy as np
 
 from .kernels import kernel_by_name
 
-__all__ = ["build_taps", "resample_axis", "resample", "TapTable"]
+__all__ = ["build_taps", "resample_axis", "resample", "subpixel_resample",
+           "TapTable"]
+
+# Where an LCD's three emitters sit inside one pixel, measured in destination
+# pixels from the pixel's centre.  This is the RGB stripe layout, which is what
+# almost every desktop IPS and VA panel uses and what ClearType assumes.
+RGB_STRIPE_OFFSETS = (-1.0 / 3.0, 0.0, 1.0 / 3.0)
 
 
 class TapTable:
@@ -45,12 +51,18 @@ class TapTable:
 
 
 def build_taps(src_len: int, dst_len: int, kernel: Callable,
-               support: float | None = None) -> TapTable:
+               support: float | None = None, phase: float = 0.0) -> TapTable:
     """Build the polyphase tap table mapping ``src_len`` samples to ``dst_len``.
 
     When downsampling the kernel is *widened* by the scale ratio.  Skipping
     that step is what turns a 4K -> 1440p resolve into an aliased mess: the
     filter has to be low-pass for the destination grid, not the source grid.
+
+    ``phase`` shifts every sample point by that fraction of a *destination*
+    pixel.  It exists for the subpixel resolve: an LCD's red, green and blue
+    emitters are not at the same place, they are at -1/3, 0 and +1/3 of a pixel
+    across, and sampling each channel where its emitter actually sits is what
+    ClearType does for glyphs.  See ``subpixel_resample``.
     """
     if src_len < 1 or dst_len < 1:
         raise ValueError("lengths must be >= 1")
@@ -64,7 +76,7 @@ def build_taps(src_len: int, dst_len: int, kernel: Callable,
     filter_scale = max(scale, 1.0)       # widen only when minifying
     ksupport = support * filter_scale
 
-    centres = (np.arange(dst_len, dtype=np.float64) + 0.5) * scale
+    centres = (np.arange(dst_len, dtype=np.float64) + 0.5 + phase) * scale
     lo = np.floor(centres - ksupport + 0.5).astype(np.int64)
     hi = np.ceil(centres + ksupport + 0.5).astype(np.int64)
 
@@ -135,4 +147,46 @@ def resample(img: np.ndarray, dst_h: int, dst_w: int,
         out = resample_axis(img, build_taps(src_w, dst_w, kernel), axis=1)
         out = resample_axis(out, build_taps(src_h, dst_h, kernel), axis=0)
 
+    return out
+
+
+def subpixel_resample(img: np.ndarray, dst_h: int, dst_w: int,
+                      kernel: str | Callable = "lanczos2",
+                      offsets=RGB_STRIPE_OFFSETS) -> np.ndarray:
+    """Resolve each colour channel at the position of its own emitter.
+
+    An ordinary resolve computes one value per output pixel and lights all
+    three emitters with it, which throws away the fact that they are in three
+    different places.  That is the same information ClearType exploits to make
+    small glyphs legible, and it is why supersampling a desktop softens text
+    that native rendering keeps crisp: the resolve averages the subpixel
+    structure away.
+
+    This samples the red channel a third of a pixel left of centre and the blue
+    channel a third right, so each emitter shows what is actually in front of
+    it.  Horizontal detail only -- the emitters are side by side, so nothing is
+    gained vertically.
+
+    ``img`` must be (H, W, 3).  ``offsets`` is the panel's layout; pass it
+    reversed for a BGR panel, and do not use this at all on a display whose
+    subpixels are not in vertical stripes, where it will produce colour
+    fringing instead of detail.
+    """
+    if isinstance(kernel, str):
+        kernel = kernel_by_name(kernel)
+
+    img = np.asarray(img, dtype=np.float64)
+    if img.ndim != 3 or img.shape[2] != len(offsets):
+        raise ValueError(f"expected (H, W, {len(offsets)})")
+
+    src_h, src_w = img.shape[0], img.shape[1]
+
+    # Vertical first: it is shared by all three channels, so doing it once
+    # before the per-channel horizontal pass is both cheaper and identical.
+    rows = resample_axis(img, build_taps(src_h, dst_h, kernel), axis=0)
+
+    out = np.empty((dst_h, dst_w, len(offsets)), dtype=np.float64)
+    for channel, offset in enumerate(offsets):
+        taps = build_taps(src_w, dst_w, kernel, phase=offset)
+        out[..., channel] = resample_axis(rows[..., channel], taps, axis=1)
     return out

@@ -21,7 +21,10 @@ cbuffer ResolveConstants : register(b0)
     uint  gTapCount;     // taps per destination pixel, uniform across the axis
     uint  gAxis;         // 0 = horizontal, 1 = vertical
     uint  gLinearize;    // 1 = decode sRGB before averaging, encode after
-    uint  gPad;
+    // 1 = resolve each colour channel at its own emitter's position. Only
+    // meaningful on the horizontal pass: the emitters are side by side, so
+    // there is nothing to recover vertically.
+    uint  gSubpixel;
     // Where in the output this pass's (0,0) lands. Non-zero only on the final
     // pass when the source is being letterboxed into a differently-shaped
     // panel; the intermediate always starts at the origin.
@@ -35,7 +38,39 @@ StructuredBuffer<int>   gFirstTap : register(t0);
 StructuredBuffer<float> gWeights  : register(t1);
 
 Texture2D<float4>   gSource : register(t2);
+
+// The same tables again, built a third of a destination pixel to either side.
+// Bound only for the subpixel resolve; they carry the centre tables otherwise,
+// so the shader stays correct if it reads them regardless.
+StructuredBuffer<int>   gFirstTapRed  : register(t3);
+StructuredBuffer<float> gWeightsRed   : register(t4);
+StructuredBuffer<int>   gFirstTapBlue : register(t5);
+StructuredBuffer<float> gWeightsBlue  : register(t6);
+
 RWTexture2D<float4> gOutput : register(u0);
+
+// One channel of one destination pixel, gathered through its own tap table.
+float ResolveChannel(uint dstIndex, uint2 tid, uint channel, int maxSrc,
+                     StructuredBuffer<int> firstTaps,
+                     StructuredBuffer<float> weights)
+{
+    const int  first = firstTaps[dstIndex];
+    const uint wBase = dstIndex * gTapCount;
+
+    float acc = 0.0f;
+    [loop]
+    for (uint t = 0; t < gTapCount; ++t)
+    {
+        const int s = clamp(first + int(t), 0, maxSrc);
+        const uint2 coord = (gAxis == 0) ? uint2(uint(s), tid.y)
+                                         : uint2(tid.x, uint(s));
+
+        float4 texel = gSource.Load(int3(coord, 0));
+        float3 rgb = (gLinearize != 0) ? SrgbToLinear(texel.rgb) : texel.rgb;
+        acc += rgb[channel] * weights[wBase + t];
+    }
+    return acc;
+}
 
 [numthreads(8, 8, 1)]
 void CSMain(uint3 tid : SV_DispatchThreadID)
@@ -49,6 +84,30 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     const int  first    = gFirstTap[dstIndex];
     const uint wBase    = dstIndex * gTapCount;
     const int  maxSrc   = int(((gAxis == 0) ? gSrcSize.x : gSrcSize.y)) - 1;
+
+    // Three gathers instead of one, each at its own emitter's position. Costs
+    // three times the horizontal pass, which is the cheaper of the two, and
+    // buys back the horizontal detail an ordinary resolve averages away.
+    if (gSubpixel != 0 && gAxis == 0)
+    {
+        float3 rgb;
+        rgb.r = ResolveChannel(dstIndex, tid.xy, 0, maxSrc, gFirstTapRed, gWeightsRed);
+        rgb.g = ResolveChannel(dstIndex, tid.xy, 1, maxSrc, gFirstTap, gWeights);
+        rgb.b = ResolveChannel(dstIndex, tid.xy, 2, maxSrc, gFirstTapBlue, gWeightsBlue);
+
+        // Alpha follows the centre table: it has no emitter of its own, and
+        // giving it a phase would shift the letterbox edges against the image.
+        float a = 0.0f;
+        [loop]
+        for (uint t = 0; t < gTapCount; ++t)
+        {
+            const int s = clamp(first + int(t), 0, maxSrc);
+            a += gSource.Load(int3(uint2(uint(s), tid.y), 0)).a * gWeights[wBase + t];
+        }
+
+        gOutput[uint2(int2(tid.xy) + gOutputOffset)] = float4(rgb, a);
+        return;
+    }
 
     float3 acc = 0.0f;
     float  alpha = 0.0f;

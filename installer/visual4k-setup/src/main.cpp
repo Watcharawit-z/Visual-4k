@@ -382,40 +382,57 @@ bool StepInstallDriver(const Paths& paths)
     return true;
 }
 
+// Finds the virtual display, or explains why there is not one.
+//
+// The explanation comes before the question. An earlier version offered the
+// list of attached displays first, so when the device had failed to start it
+// presented the reader's own two monitors and asked which was the one that
+// was not there. Windows had recorded the actual reason the whole time.
+bool FindVirtualDisplayOrExplain(DisplayInfo* out,
+                                 const std::vector<std::wstring>& displaysBefore)
+{
+    if (WaitForVirtualDisplay(out, kDisplayAppearSeconds, displaysBefore))
+        return true;
+
+    const DeviceStatus status = QueryVirtualDisplayStatus();
+
+    // Only worth asking when the driver is actually running: then a display
+    // does exist and it is the identification that failed, which is the one
+    // case a person can settle and the program cannot.
+    if (status.present && status.started && AskWhichDisplay(out))
+        return true;
+
+    Blank();
+    Line(L"No virtual display appeared.", Tone::Bad);
+    Blank();
+
+    if (!status.present) {
+        Line(L"The device is not there at all, which means the install did not "
+             L"take.", Tone::Bad);
+        Line(L"Try option 3 to remove what exists, then option 1 again.");
+    } else if (status.started) {
+        Line(L"The device is present and running, so the driver started and "
+             L"only the", Tone::Warn);
+        Line(L"display did not come up. That is worth reporting as a bug.",
+             Tone::Warn);
+    } else {
+        Line(L"Windows reports the device as present but stopped:", Tone::Bad);
+        Line(L"  problem code " + std::to_wstring(status.problemCode), Tone::Bad);
+        if (!status.explanation.empty())
+            Line(L"  " + status.explanation);
+    }
+    return false;
+}
+
 bool StepArrangeDisplays(const Paths& paths,
                         const std::vector<std::wstring>& displaysBefore)
 {
     Heading(L"Setting up the displays");
 
     DisplayInfo virtualDisplay;
-    if (!WaitForVirtualDisplay(&virtualDisplay, kDisplayAppearSeconds,
-                               displaysBefore) &&
-        !AskWhichDisplay(&virtualDisplay)) {
-        Blank();
-        Line(L"No virtual display appeared.", Tone::Bad);
-        Blank();
-
-        // Windows already knows why. Reading it here turns "it did not work"
-        // into a specific cause, without a trip through Device Manager.
-        const DeviceStatus status = QueryVirtualDisplayStatus();
-        if (!status.present) {
-            Line(L"The device is not there at all, which means the install did "
-                 L"not take.", Tone::Bad);
-            Line(L"Try option 3 to remove what exists, then option 1 again.");
-        } else if (status.started) {
-            Line(L"The device is present and running, so the driver is fine "
-                 L"and only the", Tone::Warn);
-            Line(L"display did not come up. That is worth reporting as a bug.",
-                 Tone::Warn);
-        } else {
-            Line(L"Windows reports the device as present but stopped:", Tone::Bad);
-            Line(L"  problem code " + std::to_wstring(status.problemCode),
-                 Tone::Bad);
-            if (!status.explanation.empty())
-                Line(L"  " + status.explanation);
-        }
+    if (!FindVirtualDisplayOrExplain(&virtualDisplay, displaysBefore))
         return false;
-    }
+
     Line(L"  virtual display: " + virtualDisplay.deviceName + L" (" +
          virtualDisplay.description + L")", Tone::Good);
 

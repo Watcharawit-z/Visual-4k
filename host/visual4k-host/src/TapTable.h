@@ -67,10 +67,24 @@ struct TapTable {
     size_t IndexBytes() const { return firstTap.size() * sizeof(int32_t); }
 };
 
+// Where an LCD's three emitters sit inside one pixel, in destination pixels
+// from its centre. RGB stripe, which is what desktop IPS and VA panels use and
+// what ClearType assumes.
+constexpr double kSubpixelOffsetRed   = -1.0 / 3.0;
+constexpr double kSubpixelOffsetGreen =  0.0;
+constexpr double kSubpixelOffsetBlue  =  1.0 / 3.0;
+
 // Builds the table for one axis. When minifying, the kernel is widened by the
 // scale ratio: the filter has to be low-pass for the *destination* grid, and
 // forgetting that is what turns a 4K resolve back into an aliased mess.
+//
+// `phase` shifts every sample point by that fraction of a destination pixel.
+// It is what makes the subpixel resolve possible: a pixel's red, green and
+// blue emitters are not in the same place, and sampling each channel where its
+// own emitter sits is the trick ClearType uses to make small glyphs legible.
+// An ordinary resolve throws that structure away, which is why supersampling a
+// desktop softens text that native rendering keeps crisp.
 TapTable BuildTapTable(uint32_t srcLength, uint32_t dstLength, Kernel kernel,
-                       double gaussianSigma = 0.5);
+                       double gaussianSigma = 0.5, double phase = 0.0);
 
 }  // namespace visual4k

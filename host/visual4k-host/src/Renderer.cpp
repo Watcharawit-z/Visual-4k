@@ -222,6 +222,15 @@ void Renderer::SetSettings(const RendererSettings& settings)
 
 void Renderer::RebuildTapTables()
 {
+    if (settings_.subpixelResolve) {
+        horizontalTapsRed_ = BuildTapTable(srcWidth_, fitWidth_, settings_.kernel,
+                                           settings_.gaussianSigma,
+                                           kSubpixelOffsetRed);
+        horizontalTapsBlue_ = BuildTapTable(srcWidth_, fitWidth_, settings_.kernel,
+                                            settings_.gaussianSigma,
+                                            kSubpixelOffsetBlue);
+    }
+
     horizontalTaps_ = BuildTapTable(srcWidth_, fitWidth_, settings_.kernel,
                                     settings_.gaussianSigma);
     verticalTaps_ = BuildTapTable(srcHeight_, fitHeight_, settings_.kernel,
@@ -346,6 +355,15 @@ HRESULT Renderer::Resize(uint32_t srcWidth, uint32_t srcHeight,
 
     RebuildTapTables();
 
+    if (settings_.subpixelResolve) {
+        HRESULT sub = UploadTapTable(horizontalTapsRed_, hFirstTapRedSrv_,
+                                     hWeightsRedSrv_);
+        if (FAILED(sub)) return sub;
+        sub = UploadTapTable(horizontalTapsBlue_, hFirstTapBlueSrv_,
+                             hWeightsBlueSrv_);
+        if (FAILED(sub)) return sub;
+    }
+
     HRESULT hr = UploadTapTable(horizontalTaps_, hFirstTapSrv_, hWeightsSrv_);
     if (FAILED(hr)) return hr;
 
@@ -366,9 +384,9 @@ void Renderer::UnbindComputeStage()
     // A UAV left bound cannot be read as an SRV on the next pass, and D3D
     // silently NULLs the conflicting binding instead of failing -- which shows
     // up as a black frame rather than an error. Unbind explicitly.
-    ID3D11ShaderResourceView* nullSrvs[3] = {nullptr, nullptr, nullptr};
+    ID3D11ShaderResourceView* nullSrvs[7] = {};
     ID3D11UnorderedAccessView* nullUav[1] = {nullptr};
-    context_->CSSetShaderResources(0, 3, nullSrvs);
+    context_->CSSetShaderResources(0, 7, nullSrvs);
     context_->CSSetUnorderedAccessViews(0, 1, nullUav, nullptr);
 }
 
@@ -394,19 +412,30 @@ HRESULT Renderer::RunResolvePass(uint32_t axis, ID3D11ShaderResourceView* srcSrv
     c->tapCount = tapCount;
     c->axis = axis;
     c->linearize = settings_.linearResolve ? 1u : 0u;
-    c->pad = 0;
+    // Only the horizontal pass can recover anything: the emitters are side by
+    // side, so a vertical phase shift would move the image, not sharpen it.
+    c->subpixel = (settings_.subpixelResolve && axis == 0) ? 1u : 0u;
     c->outputOffset[0] = offsetX;
     c->outputOffset[1] = offsetY;
     c->pad2[0] = c->pad2[1] = 0;
     context_->Unmap(resolveCb_.Get(), 0);
 
-    ID3D11ShaderResourceView* srvs[3] = {firstTapSrv, weightsSrv, srcSrv};
+    // The red and blue tables are bound whether or not they are used. When the
+    // subpixel resolve is off they carry the centre tables, so a shader that
+    // read them anyway would still be correct rather than subtly wrong.
+    ID3D11ShaderResourceView* srvs[7] = {
+        firstTapSrv, weightsSrv, srcSrv,
+        hFirstTapRedSrv_ ? hFirstTapRedSrv_.Get() : firstTapSrv,
+        hWeightsRedSrv_ ? hWeightsRedSrv_.Get() : weightsSrv,
+        hFirstTapBlueSrv_ ? hFirstTapBlueSrv_.Get() : firstTapSrv,
+        hWeightsBlueSrv_ ? hWeightsBlueSrv_.Get() : weightsSrv,
+    };
     ID3D11Buffer* cbs[1] = {resolveCb_.Get()};
     ID3D11UnorderedAccessView* uavs[1] = {dstUav};
 
     context_->CSSetShader(resolveCs_.Get(), nullptr, 0);
     context_->CSSetConstantBuffers(0, 1, cbs);
-    context_->CSSetShaderResources(0, 3, srvs);
+    context_->CSSetShaderResources(0, 7, srvs);
     context_->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
     context_->Dispatch(DispatchCount(dstW), DispatchCount(dstH), 1);
 
