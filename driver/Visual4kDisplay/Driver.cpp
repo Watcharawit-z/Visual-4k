@@ -216,22 +216,19 @@ NTSTATUS EvtAdapterCommitModes(IDDCX_ADAPTER /*adapter*/,
 // WDF plumbing
 // ---------------------------------------------------------------------------
 
-NTSTATUS EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE /*previous*/)
+// Brings the adapter up.
+//
+// This runs from D0Entry rather than PrepareHardware because that is where
+// Microsoft's indirect display sample does it, and this driver was written
+// from memory of that sample rather than from the sample. Reading the actual
+// source turned up three differences, all of them here or next door, and every
+// one of them a plausible cause of the adapter init being refused.
+NTSTATUS InitAdapter(DeviceContext* ctx, WDFDEVICE device)
 {
-    auto* ctx = GetDeviceContext(device);
-    ctx->processor.reset();
-    RecordStage(L"EvtDeviceD0Entry", STATUS_SUCCESS);
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS EvtDevicePrepareHardware(WDFDEVICE device,
-                                  WDFCMRESLIST /*raw*/, WDFCMRESLIST /*translated*/)
-{
-    auto* ctx = GetDeviceContext(device);
-
     IDDCX_ADAPTER_CAPS caps = {};
     caps.Size = sizeof(caps);
     caps.MaxMonitorsSupported = 1;
+
     caps.EndPointDiagnostics.Size = sizeof(caps.EndPointDiagnostics);
     caps.EndPointDiagnostics.GammaSupport = IDDCX_FEATURE_IMPLEMENTATION_NONE;
     caps.EndPointDiagnostics.TransmissionType =
@@ -239,6 +236,18 @@ NTSTATUS EvtDevicePrepareHardware(WDFDEVICE device,
     caps.EndPointDiagnostics.pEndPointFriendlyName = L"Visual-4k Virtual Display";
     caps.EndPointDiagnostics.pEndPointManufacturerName = L"Visual-4k";
     caps.EndPointDiagnostics.pEndPointModelName = L"Supersampling Source";
+
+    // These two were left null, and null is not something the class extension
+    // accepts here. That is very likely the whole of what
+    // IddCxAdapterInitAsync was refusing with STATUS_INVALID_PARAMETER: the
+    // call names no parameter, and a missing required pointer looks from
+    // outside exactly like a wrong structure size, which is what the last few
+    // attempts went hunting for instead.
+    IDDCX_ENDPOINT_VERSION version = {};
+    version.Size = sizeof(version);
+    version.MajorVer = 1;
+    caps.EndPointDiagnostics.pFirmwareVersion = &version;
+    caps.EndPointDiagnostics.pHardwareVersion = &version;
 
     WDF_OBJECT_ATTRIBUTES adapterAttributes;
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&adapterAttributes, ContextWrapper);
@@ -248,82 +257,25 @@ NTSTATUS EvtDevicePrepareHardware(WDFDEVICE device,
     init.pCaps = &caps;
     init.ObjectAttributes = &adapterAttributes;
 
-    // Recorded before the call, not after, because the call's only complaint
-    // is STATUS_INVALID_PARAMETER, which names no parameter. These are the
-    // arguments most able to be wrong in exactly that way: a structure whose
-    // compiled size does not match what the loaded class extension expects
-    // looks, from the outside, indistinguishable from every other bad
-    // argument.
-    wchar_t sizes[256];
-    std::swprintf(sizes, 256,
-                  L"iddcx=%d.%d umdf=%d.%d caps=%zu diag=%zu init=%zu "
-                  L"monitorInfo=%zu clientConfig=%zu",
-                  IDDCX_VERSION_MAJOR, IDDCX_VERSION_MINOR,
-                  UMDF_VERSION_MAJOR, UMDF_VERSION_MINOR,
-                  sizeof(IDDCX_ADAPTER_CAPS),
-                  sizeof(IDDCX_ENDPOINT_DIAGNOSTIC_INFO),
-                  sizeof(IDARG_IN_ADAPTER_INIT),
-                  sizeof(IDDCX_MONITOR_INFO),
-                  sizeof(IDD_CX_CLIENT_CONFIG));
-    RecordDetail(L"CompiledSizes", sizes);
-
-    // The size is offered rather than asserted.
-    //
-    // IddCxAdapterInitAsync refused this structure with
-    // STATUS_INVALID_PARAMETER, naming no parameter, while every field in it
-    // matches Microsoft's sample exactly. The one thing a sample cannot
-    // disagree about is the layout the header happens to emit: the class
-    // extension validates Size against the version it is operating as, and the
-    // header versions its callback tables but not necessarily its data
-    // structures. So a driver built for 1.2 can hand over a structure sized
-    // for something newer and be refused for it.
-    //
-    // Rather than guess which layout this machine's extension expects -- and
-    // guessing is what cost the last several attempts -- offer each plausible
-    // one and let it choose. The full compiled size first, since that is right
-    // whenever the header did version the structure, then the size implied by
-    // the fields this driver actually sets. Every attempt is recorded, so a
-    // total failure still says what was tried.
-    const size_t fullDiagnostics = sizeof(IDDCX_ENDPOINT_DIAGNOSTIC_INFO);
-    const size_t usedCaps =
-        offsetof(IDDCX_ADAPTER_CAPS, EndPointDiagnostics) + fullDiagnostics;
-
-    struct Layout { size_t caps; size_t diagnostics; };
-    const Layout layouts[] = {
-        {sizeof(IDDCX_ADAPTER_CAPS), fullDiagnostics},
-        {usedCaps,                   fullDiagnostics},
-    };
-
-    NTSTATUS status = STATUS_INVALID_PARAMETER;
     IDARG_OUT_ADAPTER_INIT initOut = {};
-
-    for (const Layout& layout : layouts) {
-        caps.Size = static_cast<UINT>(layout.caps);
-        caps.EndPointDiagnostics.Size = static_cast<UINT>(layout.diagnostics);
-
-        initOut = {};
-        status = IddCxAdapterInitAsync(&init, &initOut);
-
-        wchar_t attempt[128];
-        std::swprintf(attempt, 128, L"IddCxAdapterInitAsync caps=%zu diag=%zu",
-                      layout.caps, layout.diagnostics);
-        RecordStage(attempt, status);
-
-        if (NT_SUCCESS(status))
-            break;
-    }
-
+    const NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);
+    RecordStage(L"IddCxAdapterInitAsync", status);
     if (!NT_SUCCESS(status))
         return status;
 
     ctx->adapter = initOut.AdapterObject;
     GetContextWrapper(initOut.AdapterObject)->device = ctx;
-
-    // Success here only means the adapter init was accepted; it finishes
-    // asynchronously in EvtAdapterInitFinished, which is where the monitor is
-    // created and where a later failure will be recorded from.
-    RecordStage(L"EvtDevicePrepareHardware complete", STATUS_SUCCESS);
     return STATUS_SUCCESS;
+}
+
+NTSTATUS EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE /*previous*/)
+{
+    auto* ctx = GetDeviceContext(device);
+    ctx->processor.reset();
+
+    const NTSTATUS status = InitAdapter(ctx, device);
+    RecordStage(L"EvtDeviceD0Entry", status);
+    return status;
 }
 
 void EvtDeviceContextCleanup(WDFOBJECT object)
@@ -331,33 +283,15 @@ void EvtDeviceContextCleanup(WDFOBJECT object)
     GetDeviceContext(static_cast<WDFDEVICE>(object))->~DeviceContext();
 }
 
-// The driver exposes no control interface, so every request is refused.
-//
-// It exists because IddCxDeviceInitConfig validates that the mandatory
-// callbacks are set, and this one is mandatory. Leaving it null is the only
-// difference between this configuration and Microsoft's own sample, and it
-// matches the evidence exactly: at IddCx 1.2 the configuration was accepted
-// and the driver ran on to fail later, while every version from 1.3 to 1.10
-// refused it and the driver's code never ran at all. Which callbacks are
-// required is precisely the kind of thing that changes between versions.
-VOID EvtDeviceIoControl(WDFDEVICE /*device*/, WDFREQUEST request,
-                        size_t /*outputBufferLength*/,
-                        size_t /*inputBufferLength*/, ULONG /*ioControlCode*/)
-{
-    WdfRequestComplete(request, STATUS_NOT_SUPPORTED);
-}
-
 NTSTATUS EvtDeviceAdd(WDFDRIVER /*driver*/, PWDFDEVICE_INIT deviceInit)
 {
     WDF_PNPPOWER_EVENT_CALLBACKS power;
     WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&power);
-    power.EvtDevicePrepareHardware = EvtDevicePrepareHardware;
     power.EvtDeviceD0Entry = EvtDeviceD0Entry;
     WdfDeviceInitSetPnpPowerEventCallbacks(deviceInit, &power);
 
     IDD_CX_CLIENT_CONFIG config;
     IDD_CX_CLIENT_CONFIG_INIT(&config);
-    config.EvtIddCxDeviceIoControl = EvtDeviceIoControl;
     config.EvtIddCxAdapterInitFinished = EvtAdapterInitFinished;
     config.EvtIddCxParseMonitorDescription = EvtParseMonitorDescription;
     config.EvtIddCxMonitorGetDefaultDescriptionModes = EvtMonitorGetDefaultModes;
