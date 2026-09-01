@@ -1,65 +1,61 @@
-This release stops guessing which version of the display class extension your
-Windows provides, and finds out on your machine instead.
+The seven-version sweep in v0.2.1 found the cause, and it was not the version.
 
-## What v0.2.0 actually showed
+## What the sweep showed
 
-It failed with problem code 31 and this record:
+Every shipped package failed identically:
 
-    at        : 2026-09-01 08:31:08Z
-    built with: iddcx=1.2 ...
+    IddCx 1.10 .. 1.3    problem code 31, at every single version
 
-Both lines are from the *previous* run. v0.2.0 was built for IddCx 1.9 and
-wrote nothing at all, which means `EvtDeviceAdd` was never entered: Windows
-could not load the 1.9 class extension.
+That uniformity is the finding. If the class extension version were the
+problem, the versions would behave differently -- and one of them does. IddCx
+1.2, tested in earlier releases, *accepted* the driver's configuration and ran
+on to fail later at the adapter init. Everything from 1.3 up refuses the
+configuration outright, and the driver's own code never runs at all.
 
-So both guesses were wrong in opposite directions. 1.2 loaded but was too old
-for the structures the header emits, and the adapter init was refused. 1.9 is
-too new for this machine to provide, and the driver's own code never ran.
+Something changes between 1.2 and 1.3 that decides whether the configuration is
+accepted. What changes is which callbacks `IddCxDeviceInitConfig` treats as
+mandatory.
 
-A stale record complete with its own timestamp and build version looks exactly
-like a fresh answer, and it nearly sent the next fix in the wrong direction.
-Setup now clears the record before every attempt.
+## The cause
 
-## What this release does instead
+Comparing this driver's configuration against Microsoft's own indirect display
+sample, line by line, there is exactly one difference:
 
-The build compiles **one driver package per IddCx version the kit supports**,
-signs each with its own catalog, and ships them all -- seven of them in this
-archive.
+    the sample sets 8 callbacks, including EvtIddCxDeviceIoControl
+    this driver set 7, and never that one
 
-Setup installs them newest first and keeps the one whose device actually
-starts, removing each failure before trying the next so the following attempt
-is a clean create rather than an update of a broken node.
+It is set now. It refuses every request, which is what the sample's does and
+all this driver needs -- it exposes no control interface of its own.
 
-Success is judged by the device starting, never by the install reporting
-success. Every failure in this sequence reported success at every install step.
+## If it is still wrong, the next run says so precisely
 
-You will see it work through them:
+The sweep printed problem code 31 seven times, which concealed the only thing
+that distinguished the attempts: how far each one got before failing.
 
-    7 driver packages available; trying newest first
+Each candidate now prints what the driver itself recorded:
 
-      IddCx 1.9:
-        not this one (problem code 31)
-      IddCx 1.8:
-        ...
+    IddCx 1.9:
+      not this one (problem code 31)
+      reached IddCxDeviceInitConfig, 0xC000000D
 
-The machine has the answer; there is no reason for me to keep guessing at it
-from a build server.
+So a failure names the refusing call and its status, for every version, in a
+single pass.
 
 ## Installing
 
 Straight over the previous version. Extract the zip, double-click
 **Visual4k-Setup.exe**, choose **1**.
 
-The install takes longer than before -- it may try several packages -- and the
-per-attempt failures scrolling past are expected, not errors.
+It still tries the packages newest first, so failures scrolling past before one
+succeeds are expected rather than errors.
 
-## Where this sequence has got to
+## The sequence so far
 
     31, EvtDeviceAdd failed        UMDF version mismatch, fixed
     10, EvtDeviceAdd complete      something after it
     10, IddCxAdapterInitAsync      invalid parameter, at IddCx 1.2
     31, no record at all           IddCx 1.9 not present on the machine
-    ->                             every version, tried on the machine
+    31, at all seven versions      not the version: a missing callback
 
 ## Also in here
 
