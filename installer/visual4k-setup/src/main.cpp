@@ -19,8 +19,10 @@
 #include <tlhelp32.h>
 
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <string>
 #include <vector>
 
@@ -45,11 +47,24 @@ constexpr int kDisplayAppearSeconds = 20;
 // present, so that its exit code is meaningful if it did not.
 constexpr int kCompositorSettleMs = 4000;
 
+// One driver package, built for one version of the display class extension.
+//
+// Which version a given Windows provides is not knowable from here, and two
+// releases were spent guessing at it: 1.2 was too old for the structures the
+// header emits, 1.9 too new for the machine to load at all. So the build ships
+// every version it can compile, and setup finds out by trying.
+struct DriverCandidate {
+    std::wstring label;   // "1.9"
+    unsigned rank = 0;    // major * 1000 + minor, for ordering
+    std::wstring inf;
+};
+
 struct Paths {
     std::wstring root;
-    std::wstring inf;
+    std::wstring inf;     // the single-package layout, when there is one
     std::wstring cer;
     std::wstring host;
+    std::vector<DriverCandidate> candidates;   // newest first
 };
 
 std::wstring ExecutableDirectory()
@@ -85,7 +100,38 @@ bool ResolvePaths(Paths* paths)
     paths->inf = paths->root + L"\\driver\\Visual4kDisplay.inf";
     paths->host = paths->root + L"\\visual4k-host.exe";
 
-    if (!Exists(paths->inf)) {
+    // Packages built for a particular extension version live beside the plain
+    // one, as driver\iddcx-1.4 and so on.
+    WIN32_FIND_DATAW entry = {};
+    HANDLE packages = FindFirstFileW((paths->root + L"\\driver\\iddcx-*").c_str(),
+                                     &entry);
+    if (packages != INVALID_HANDLE_VALUE) {
+        do {
+            if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+                continue;
+
+            DriverCandidate candidate;
+            candidate.label = std::wstring(entry.cFileName).substr(6);  // "iddcx-"
+            candidate.inf = paths->root + L"\\driver\\" + entry.cFileName +
+                            L"\\Visual4kDisplay.inf";
+            if (!Exists(candidate.inf))
+                continue;
+
+            unsigned major = 0, minor = 0;
+            if (std::swscanf(candidate.label.c_str(), L"%u.%u", &major, &minor) != 2)
+                continue;
+            candidate.rank = major * 1000 + minor;
+            paths->candidates.push_back(candidate);
+        } while (FindNextFileW(packages, &entry));
+        FindClose(packages);
+    }
+
+    std::sort(paths->candidates.begin(), paths->candidates.end(),
+              [](const DriverCandidate& a, const DriverCandidate& b) {
+                  return a.rank > b.rank;
+              });
+
+    if (paths->candidates.empty() && !Exists(paths->inf)) {
         Line(L"The driver folder is missing.", Tone::Bad);
         Line(L"  expected: " + paths->inf);
         Blank();
@@ -351,6 +397,29 @@ bool StepTestSigning()
     return false;
 }
 
+// How long to give one candidate before deciding it is not the one. Shorter
+// than the final wait: this runs once per shipped version, and a package the
+// machine cannot load fails immediately rather than slowly.
+constexpr int kCandidateSettleSeconds = 6;
+
+// Stages one package and binds it, reporting only whether that much worked.
+bool InstallOnePackage(const std::wstring& infPath)
+{
+    bool rebootRequired = false;
+    const Result installed = InstallVirtualDisplay(infPath, &rebootRequired);
+    if (!installed.ok) {
+        Line(L"    " + installed.detail, Tone::Dim);
+        return false;
+    }
+    if (rebootRequired) {
+        Line(L"  Windows wants a restart to finish this. Restart and run setup",
+             Tone::Warn);
+        Line(L"  again.", Tone::Warn);
+        return false;
+    }
+    return true;
+}
+
 bool StepInstallDriver(const Paths& paths)
 {
     Heading(L"Installing the virtual display");
@@ -374,19 +443,53 @@ bool StepInstallDriver(const Paths& paths)
              L"less detail", Tone::Warn);
     }
 
-    bool rebootRequired = false;
-    const Result installed = InstallVirtualDisplay(paths.inf, &rebootRequired);
-    if (!installed.ok) {
-        Line(L"  " + installed.detail, Tone::Bad);
-        return false;
+    if (paths.candidates.empty())
+        return InstallOnePackage(paths.inf);
+
+    // Newest first. Which extension version a Windows provides is not
+    // discoverable from here with any confidence -- two releases were spent
+    // guessing, once too low and once too high -- so the build ships every
+    // version it can compile and this finds out by trying. A package built for
+    // a version this machine lacks cannot even reach the driver's own code, so
+    // each attempt is checked by whether the device actually starts, not by
+    // whether the install reported success.
+    Line(L"  " + std::to_wstring(paths.candidates.size()) +
+         L" driver packages available; trying newest first");
+
+    for (const DriverCandidate& candidate : paths.candidates) {
+        Blank();
+        Line(L"  IddCx " + candidate.label + L":", Tone::Dim);
+
+        ClearDriverRecord();
+        if (!InstallOnePackage(candidate.inf))
+            continue;
+
+        DisplayInfo unused;
+        if (WaitForVirtualDisplay(&unused, kCandidateSettleSeconds, {})) {
+            Line(L"    the display came up", Tone::Good);
+            return true;
+        }
+
+        const DeviceStatus status = QueryVirtualDisplayStatus();
+        if (status.started) {
+            Line(L"    the device started", Tone::Good);
+            return true;
+        }
+
+        Line(L"    not this one (problem code " +
+             std::to_wstring(status.problemCode) + L")", Tone::Dim);
+
+        // Removed before the next attempt: leaving a stopped device behind
+        // makes the following install an update of a broken node rather than a
+        // clean try.
+        bool ignored = false;
+        RemoveVirtualDisplay(candidate.inf, &ignored);
     }
-    if (rebootRequired) {
-        Line(L"  Windows wants a restart to finish this. Restart and run setup",
-             Tone::Warn);
-        Line(L"  again.", Tone::Warn);
-        return false;
-    }
-    return true;
+
+    Blank();
+    Line(L"None of the shipped driver packages started on this machine.",
+         Tone::Bad);
+    return false;
 }
 
 // Finds the virtual display, or explains why there is not one.

@@ -51,6 +51,14 @@ DeviceStatus QueryVirtualDisplayStatus();
 // created so that the very first start attempt is already being recorded.
 bool PrepareDiagnosticsKey();
 
+// Erases the previous attempt's record.
+//
+// Without this a failure that never reaches the driver at all leaves the
+// record from an earlier run sitting there, complete with its own timestamp
+// and the version it was built with, looking exactly like a fresh answer. That
+// happened, and it very nearly sent the next fix in the wrong direction.
+void ClearDriverRecord();
+
 // What the driver last recorded, empty if it recorded nothing. "Nothing" is
 // itself informative: it means the driver's EvtDeviceAdd was never entered.
 struct DriverRecord {

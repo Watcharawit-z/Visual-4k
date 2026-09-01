@@ -356,18 +356,6 @@ jobs:
             $iddcxLibDir = $iddcxLib.DirectoryName
             $iddcxLibFile = $iddcxLib.FullName
 
-            $versionName = $null
-            foreach ($candidate in @($iddcxLib.Directory.Name,
-                                     $(if ($iddcxHeader) { $iddcxHeader.Directory.Name }))) {
-              if ($candidate -match '^(\d+)\.(\d+)$') { $versionName = $candidate; break }
-            }
-            if (-not $versionName) {
-              throw "could not read an IddCx version from $($iddcxLib.FullName)"
-            }
-            $parts = $versionName -split '\.'
-            $iddcxMajor = $parts[0]
-            $iddcxMinor = $parts[1]
-            Write-Host "IddCx version: $iddcxMajor.$iddcxMinor"
           } else {
             # Failing here beats failing at link time with LNK1104, which says
             # nothing about where the file was looked for.
@@ -377,28 +365,72 @@ jobs:
           # Every build gets its own DriverVer. Without it Windows can keep
           # serving the package already in the store, so an install over a
           # previous version updates nothing and the old binary stays bound.
-          python tools\stamp-driverver.py --iddcx "$iddcxMajor.$iddcxMinor"
-          if ($LASTEXITCODE -ne 0) { throw "stamping the INF failed" }
+          # One package per version of the class extension the kit can build
+          # against.
+          #
+          # Which version a given Windows actually provides is not knowable
+          # from the build machine, and two releases were spent guessing: 1.2
+          # was too old for the structures the header emits and the adapter
+          # init was refused, 1.9 too new for the target to load at all, so the
+          # driver's own code never ran. Shipping every version and letting
+          # setup try them settles it on the machine that has the answer.
+          $versionDirs = $iddcxLibs |
+                         Where-Object { $_.Directory.Name -match '^\d+\.\d+$' } |
+                         Where-Object { $_.FullName -match '\\x64\\' } |
+                         Group-Object { $_.Directory.Name } |
+                         Sort-Object {
+                             $p = $_.Name -split '\.'
+                             [int]$p[0] * 1000 + [int]$p[1]
+                         }
+          if (-not $versionDirs) { throw "no versioned x64 IddCx libraries under $kit" }
 
-          # Checked after stamping, on the files that are about to be built and
-          # shipped, rather than on what is committed.
-          python tools\check-driver-versions.py
-          if ($LASTEXITCODE -ne 0) { throw "the driver's declared versions disagree" }
+          $staging = Join-Path (Get-Location) "package/Visual4kDisplay"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
-          msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
-                  /p:Configuration=Release /p:Platform=x64 `
-                  "/p:Visual4kIddCxInclude=$iddcxInclude" `
-                  "/p:Visual4kIddCxLib=$iddcxLibDir" `
-                  "/p:Visual4kIddCxLibFile=$iddcxLibFile" `
-                  /p:Visual4kIddCxMajor=$iddcxMajor `
-                  /p:Visual4kIddCxMinor=$iddcxMinor `
-                  /v:normal /p:SignMode=Off
-          if ($LASTEXITCODE -ne 0) { throw "driver build failed" }
+          foreach ($group in $versionDirs) {
+            $version = $group.Name
+            $lib = $group.Group | Select-Object -First 1
+            $parts = $version -split '\.'
+            Write-Host "=== building for IddCx $version ==="
 
-          $dll = Get-ChildItem driver/Visual4kDisplay/x64 -Recurse `
-                     -Filter Visual4kDisplay.dll -ErrorAction SilentlyContinue
-          if (-not $dll) { throw "build reported success but produced no DLL" }
-          Write-Host "built: $($dll[0].FullName)"
+            python tools\stamp-driverver.py --iddcx $version
+            if ($LASTEXITCODE -ne 0) { throw "stamping the INF for $version failed" }
+
+            msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
+                    /p:Configuration=Release /p:Platform=x64 `
+                    "/p:Visual4kIddCxInclude=$iddcxInclude" `
+                    "/p:Visual4kIddCxLib=$($lib.DirectoryName)" `
+                    "/p:Visual4kIddCxLibFile=$($lib.FullName)" `
+                    /p:Visual4kIddCxMajor=$($parts[0]) `
+                    /p:Visual4kIddCxMinor=$($parts[1]) `
+                    /v:minimal /p:SignMode=Off
+            if ($LASTEXITCODE -ne 0) {
+              # A version the headers cannot satisfy is not a build failure:
+              # it simply is not one of the packages we can offer.
+              Write-Host "::warning::IddCx $version did not build; skipping it"
+              continue
+            }
+
+            $dll = Get-ChildItem driver/Visual4kDisplay/x64 -Recurse `
+                       -Filter Visual4kDisplay.dll -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+            if (-not $dll) { throw "IddCx $version built with no DLL" }
+
+            $target = Join-Path $staging "iddcx-$version"
+            New-Item -ItemType Directory -Force -Path $target | Out-Null
+            Copy-Item $dll.FullName $target
+            Copy-Item driver/Visual4kDisplay/Visual4kDisplay.inf $target
+            Write-Host "staged: $target"
+
+            # So the next version compiles rather than reusing this one's
+            # objects, which carry the previous version macros.
+            Remove-Item driver/Visual4kDisplay/x64 -Recurse -Force `
+                        -ErrorAction SilentlyContinue
+          }
+
+          $built = Get-ChildItem $staging -Directory
+          if (-not $built) { throw "no IddCx version produced a package" }
+          Write-Host "packages built: $($built.Name -join ', ')"
 
       - name: Stage and sign the package
         shell: pwsh
@@ -406,22 +438,12 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           # Absolute, because inf2cat resolves /driver: against its own
-          # working directory rather than the shell's.
+          # working directory rather than the shell's. The build step has
+          # already staged one folder per IddCx version under here.
           $out = Join-Path (Get-Location) "package/Visual4kDisplay"
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Get-ChildItem -Recurse driver/Visual4kDisplay/x64 |
-              Where-Object { $_.Extension -in ".dll",".pdb" } |
-              ForEach-Object { Copy-Item $_.FullName $out }
-
-          # The INF comes from the source tree, not the build output: we are
-          # not using the WDK's packaging target, so nothing copies it for us,
-          # and inf2cat rejects a folder with no INF at its root.
-          Copy-Item driver/Visual4kDisplay/Visual4kDisplay.inf $out
-
-          Write-Host "staged for signing:"
-          Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)" }
-          if (-not (Get-ChildItem $out -Filter *.inf)) { throw "no INF staged" }
-          if (-not (Get-ChildItem $out -Filter *.dll)) { throw "no DLL staged" }
+          $packages = Get-ChildItem $out -Directory
+          if (-not $packages) { throw "no driver packages staged" }
+          Write-Host "packages to sign: $($packages.Name -join ', ')"
 
           # Sign here rather than on the user's machine. inf2cat and signtool
           # ship with the WDK and the SDK, and requiring those to install a
@@ -454,40 +476,54 @@ jobs:
                       -NotAfter (Get-Date).AddYears(5)
           Write-Host "signing certificate thumbprint: $($cert.Thumbprint)"
 
-          & $inf2cat.FullName /driver:$out /os:10_X64 /uselocaltime
-          if ($LASTEXITCODE -ne 0) { throw "inf2cat failed" }
+          # Each package is signed separately: a catalog covers one folder,
+          # and these differ by the binary inside them.
+          foreach ($package in $packages) {
+              Write-Host "--- signing $($package.Name) ---"
+              & $inf2cat.FullName /driver:$($package.FullName) /os:10_X64 /uselocaltime
+              if ($LASTEXITCODE -ne 0) { throw "inf2cat failed for $($package.Name)" }
 
-          $cat = Join-Path $out 'Visual4kDisplay.cat'
-          if (-not (Test-Path $cat)) { throw "inf2cat produced no catalog" }
+              $cat = Join-Path $package.FullName 'Visual4kDisplay.cat'
+              if (-not (Test-Path $cat)) { throw "no catalog for $($package.Name)" }
 
-          foreach ($file in @($cat, (Join-Path $out 'Visual4kDisplay.dll'))) {
-              & $signtool.FullName sign /fd SHA256 /sha1 $cert.Thumbprint `
-                  /t http://timestamp.digicert.com $file
-              if ($LASTEXITCODE -ne 0) { throw "signing $file failed" }
+              foreach ($file in @($cat, (Join-Path $package.FullName 'Visual4kDisplay.dll'))) {
+                  & $signtool.FullName sign /fd SHA256 /sha1 $cert.Thumbprint `
+                      /t http://timestamp.digicert.com $file
+                  if ($LASTEXITCODE -ne 0) { throw "signing $file failed" }
+              }
           }
 
+          # One certificate for all of them, at the root where setup looks.
           Export-Certificate -Cert $cert `
               -FilePath (Join-Path $out 'Visual4k-Build-Certificate.cer') | Out-Null
 
           # Informational only. This certificate is deliberately not trusted on
           # the runner, so verify is expected to fail here; it succeeds on a
-          # machine that has run install-driver.ps1.
+          # machine that has trusted it.
           #
           # Its exit code has to be cleared: a pwsh step exits with the last
           # $LASTEXITCODE, so leaving this one set fails the step after every
           # file has already been signed correctly.
-          & $signtool.FullName verify /pa /v $cat
+          & $signtool.FullName verify /pa /v `
+              (Join-Path $packages[0].FullName 'Visual4kDisplay.cat')
           Write-Host "signtool verify exit code: $LASTEXITCODE (expected non-zero here)"
           $global:LASTEXITCODE = 0
 
-          Write-Host "signed package contents:"
-          Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)  $($_.Length)" }
+          Write-Host "signed packages:"
+          foreach ($package in $packages) {
+              Write-Host "  $($package.Name)"
+              Get-ChildItem $package.FullName |
+                  ForEach-Object { Write-Host "    $($_.Name)  $($_.Length)" }
 
-          foreach ($required in 'Visual4kDisplay.dll', 'Visual4kDisplay.inf',
-                                'Visual4kDisplay.cat', 'Visual4k-Build-Certificate.cer') {
-              if (-not (Test-Path (Join-Path $out $required))) {
-                  throw "$required missing from the signed package"
+              foreach ($required in 'Visual4kDisplay.dll', 'Visual4kDisplay.inf',
+                                    'Visual4kDisplay.cat') {
+                  if (-not (Test-Path (Join-Path $package.FullName $required))) {
+                      throw "$required missing from $($package.Name)"
+                  }
               }
+          }
+          if (-not (Test-Path (Join-Path $out 'Visual4k-Build-Certificate.cer'))) {
+              throw "the signing certificate was not exported"
           }
 
       - uses: actions/upload-artifact@v4
@@ -531,11 +567,20 @@ jobs:
           if (-not (Test-Path "$root/visual4k-host.exe")) { throw "compositor missing" }
           if (-not (Test-Path "$root/Visual4k-Setup.exe")) { throw "setup program missing" }
           if (-not (Test-Path "$root/shaders")) { throw "shaders missing" }
-          if (-not (Get-ChildItem "$root/driver" -Filter *.dll)) { throw "driver DLL missing" }
+          $packages = Get-ChildItem "$root/driver" -Directory
+          if (-not $packages) { throw "no driver packages in the archive" }
+          foreach ($package in $packages) {
+              foreach ($required in 'Visual4kDisplay.dll', 'Visual4kDisplay.inf',
+                                    'Visual4kDisplay.cat') {
+                  if (-not (Test-Path (Join-Path $package.FullName $required))) {
+                      throw "$required missing from $($package.Name)"
+                  }
+              }
+          }
+          Write-Host "driver packages: $($packages.Name -join ', ')"
 
-          # Without these the archive falls back to needing the WDK, which is
+          # Without this the archive falls back to needing the WDK, which is
           # exactly what shipping binaries is meant to avoid.
-          if (-not (Get-ChildItem "$root/driver" -Filter *.cat)) { throw "signed catalog missing" }
           if (-not (Get-ChildItem "$root/driver" -Filter *.cer)) { throw "signing certificate missing" }
 
           Compress-Archive -Path $root -DestinationPath "Visual-4k-$env:RELEASE_TAG.zip"

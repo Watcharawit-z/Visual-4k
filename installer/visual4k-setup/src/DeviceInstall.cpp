@@ -202,6 +202,18 @@ bool PrepareDiagnosticsKey()
     return ok;
 }
 
+void ClearDriverRecord()
+{
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kDiagnosticsKey, 0, KEY_SET_VALUE,
+                      &key) != ERROR_SUCCESS)
+        return;
+    for (const wchar_t* name : {L"LastStage", L"LastStatus", L"LastTime",
+                                L"CompiledSizes"})
+        RegDeleteValueW(key, name);
+    RegCloseKey(key);
+}
+
 DriverRecord ReadDriverRecord()
 {
     DriverRecord record;
