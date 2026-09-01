@@ -236,6 +236,13 @@ DriverRecord ReadDriverRecord()
         record.time = text;
     }
 
+    size = sizeof(text);
+    if (RegQueryValueExW(key, L"CompiledSizes", nullptr, &type,
+                         reinterpret_cast<LPBYTE>(text), &size) == ERROR_SUCCESS &&
+        type == REG_SZ) {
+        record.compiledSizes = text;
+    }
+
     RegCloseKey(key);
     return record;
 }

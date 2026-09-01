@@ -44,4 +44,15 @@ inline constexpr wchar_t kDiagnosticsKey[] = L"SOFTWARE\\Visual-4k";
 // never ran" from "the driver ran and Windows still produced no display".
 void RecordStage(const wchar_t* stage, StatusCode status);
 
+// Records a free-text detail alongside the stage, for facts that are numbers
+// rather than outcomes.
+//
+// STATUS_INVALID_PARAMETER from a framework call says an argument was wrong
+// and nothing about which one. The sizes of the structures being passed, and
+// the version they were compiled for, are the arguments most likely to be
+// wrong in a way that produces exactly that and nothing else -- and they are
+// knowable from inside the driver, where the compiler has already decided
+// them.
+void RecordDetail(const wchar_t* name, const wchar_t* text);
+
 }  // namespace visual4k

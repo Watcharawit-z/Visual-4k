@@ -442,8 +442,10 @@ bool FindVirtualDisplayOrExplain(DisplayInfo* out,
         Line(L"  status    : " + std::wstring(code));
         if (!record.time.empty())
             Line(L"  at        : " + record.time);
+        if (!record.compiledSizes.empty())
+            Line(L"  built with: " + record.compiledSizes);
         Blank();
-        Line(L"Send those three lines; they name the failing call exactly.");
+        Line(L"Send those lines; they name the failing call exactly.");
     } else {
         Line(L"The driver recorded nothing, which means its EvtDeviceAdd was",
              Tone::Warn);

@@ -58,6 +58,9 @@ struct DriverRecord {
     std::wstring stage;
     uint32_t status = 0;
     std::wstring time;
+    // Structure sizes and framework versions the driver was compiled with,
+    // recorded before the call that rejects them.
+    std::wstring compiledSizes;
 };
 
 DriverRecord ReadDriverRecord();

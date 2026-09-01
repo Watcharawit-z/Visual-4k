@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cwchar>
 
 #include "Diagnostics.h"
 
@@ -245,6 +246,25 @@ NTSTATUS EvtDevicePrepareHardware(WDFDEVICE device,
     init.WdfDevice = device;
     init.pCaps = &caps;
     init.ObjectAttributes = &adapterAttributes;
+
+    // Recorded before the call, not after, because the call's only complaint
+    // is STATUS_INVALID_PARAMETER, which names no parameter. These are the
+    // arguments most able to be wrong in exactly that way: a structure whose
+    // compiled size does not match what the loaded class extension expects
+    // looks, from the outside, indistinguishable from every other bad
+    // argument.
+    wchar_t sizes[256];
+    std::swprintf(sizes, 256,
+                  L"iddcx=%d.%d umdf=%d.%d caps=%zu diag=%zu init=%zu "
+                  L"monitorInfo=%zu clientConfig=%zu",
+                  IDDCX_VERSION_MAJOR, IDDCX_VERSION_MINOR,
+                  UMDF_VERSION_MAJOR, UMDF_VERSION_MINOR,
+                  sizeof(IDDCX_ADAPTER_CAPS),
+                  sizeof(IDDCX_ENDPOINT_DIAGNOSTIC_INFO),
+                  sizeof(IDARG_IN_ADAPTER_INIT),
+                  sizeof(IDDCX_MONITOR_INFO),
+                  sizeof(IDD_CX_CLIENT_CONFIG));
+    RecordDetail(L"CompiledSizes", sizes);
 
     IDARG_OUT_ADAPTER_INIT initOut = {};
     NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);

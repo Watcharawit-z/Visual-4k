@@ -4,6 +4,44 @@
 
 namespace visual4k {
 
+namespace {
+
+// Opens the diagnostics key for writing, or returns null. Best effort by
+// design: a driver host without access simply leaves no record, and failing
+// the driver because its logging failed would be worse than the problem being
+// logged.
+HKEY OpenDiagnosticsKey()
+{
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, kDiagnosticsKey, 0, nullptr,
+                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key,
+                        nullptr) != ERROR_SUCCESS)
+        return nullptr;
+    return key;
+}
+
+void WriteString(HKEY key, const wchar_t* name, const wchar_t* value)
+{
+    RegSetValueExW(key, name, 0, REG_SZ,
+                   reinterpret_cast<const BYTE*>(value),
+                   static_cast<DWORD>((wcslen(value) + 1) * sizeof(wchar_t)));
+}
+
+}  // namespace
+
+void RecordDetail(const wchar_t* name, const wchar_t* text)
+{
+    wchar_t line[512];
+    std::swprintf(line, 512, L"Visual4kDisplay: %ls = %ls\n", name, text);
+    OutputDebugStringW(line);
+
+    HKEY key = OpenDiagnosticsKey();
+    if (key == nullptr)
+        return;
+    WriteString(key, name, text);
+    RegCloseKey(key);
+}
+
 void RecordStage(const wchar_t* stage, StatusCode status)
 {
     wchar_t line[256];
@@ -11,19 +49,11 @@ void RecordStage(const wchar_t* stage, StatusCode status)
                   static_cast<unsigned long>(status));
     OutputDebugStringW(line);
 
-    // Best effort from here down. A driver host without write access to the
-    // key simply leaves no record, which is worth nothing but costs nothing;
-    // failing the driver because its logging failed would be worse than the
-    // problem being logged.
-    HKEY key = nullptr;
-    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, kDiagnosticsKey, 0, nullptr,
-                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key,
-                        nullptr) != ERROR_SUCCESS)
+    HKEY key = OpenDiagnosticsKey();
+    if (key == nullptr)
         return;
 
-    RegSetValueExW(key, L"LastStage", 0, REG_SZ,
-                   reinterpret_cast<const BYTE*>(stage),
-                   static_cast<DWORD>((wcslen(stage) + 1) * sizeof(wchar_t)));
+    WriteString(key, L"LastStage", stage);
 
     const DWORD statusValue = static_cast<DWORD>(status);
     RegSetValueExW(key, L"LastStatus", 0, REG_DWORD,
@@ -35,9 +65,7 @@ void RecordStage(const wchar_t* stage, StatusCode status)
     wchar_t when[64];
     std::swprintf(when, 64, L"%04u-%02u-%02u %02u:%02u:%02uZ", now.wYear,
                   now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
-    RegSetValueExW(key, L"LastTime", 0, REG_SZ,
-                   reinterpret_cast<const BYTE*>(when),
-                   static_cast<DWORD>((wcslen(when) + 1) * sizeof(wchar_t)));
+    WriteString(key, L"LastTime", when);
 
     RegCloseKey(key);
 }
