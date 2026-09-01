@@ -1,61 +1,65 @@
-The device now gets past `EvtDeviceAdd`. This release fixes a defect found in
-the code that runs after it, and instruments the rest of that path.
+An instrumentation-only release. Nothing is fixed here; this exists to make the
+next fix a deduction rather than a fourth guess.
 
-## What v0.1.8 established
+## Where the failure is now
 
-The instrumentation earned its keep on its first run:
+v0.1.9's instrumentation named the failing call exactly:
 
-    problem code 10, not 31
-    last step : EvtDeviceAdd complete
-    status    : 0x00000000
+    problem code 10
+    last step : IddCxAdapterInitAsync
+    status    : 0xC000000D
 
-Two facts, neither of which was available before. The UMDF version fix was
-right -- `EvtDeviceAdd` now succeeds where it had been failing since the
-beginning. And the failure moved to the device's *start*, in the callbacks that
-run afterwards.
+`0xC000000D` is `STATUS_INVALID_PARAMETER`. So: the driver loads, its INF and
+signature are accepted, `EvtDeviceAdd` succeeds, the device reaches
+`EvtDevicePrepareHardware`, and the display class extension rejects the
+arguments it is handed there.
 
-## The defect that was there to find
+The failure has moved three times across the last four releases, each time to a
+later stage:
 
-`CreateMonitor` carried this comment:
+    31, EvtDeviceAdd failed          ->  the driver's config was refused
+    10, EvtDeviceAdd complete        ->  something after it failed
+    10, IddCxAdapterInitAsync        ->  this one call, with a named status
 
-> Container ID groups the virtual monitor under one device in Settings.
-> Reusing a fixed GUID keeps the user's per-monitor arrangement stable across
-> reboots instead of scattering a new display every time.
+## What this release adds
 
-The field was never assigned. It went to Windows as a null GUID, in the place
-where the identity of the monitor is supposed to be.
+The adapter capabilities are set exactly as Microsoft's own indirect display
+sample sets them, field for field. That rules out the obvious reading of
+"invalid parameter" and leaves the one thing a sample cannot disagree about:
+the sizes of the structures.
 
-The comment described the intent and the code skipped it, which is exactly the
-kind of mistake that survives being read repeatedly: the comment reads as
-though it had been done. It only came to light because the instrumentation
-narrowed the search to one function.
+Each of those structures carries a `Size` that the class extension validates
+against the version it is operating as. A structure compiled to one version's
+layout and handed to another is rejected as an invalid parameter, named as
+nothing more specific -- which is exactly the shape of what we have, and
+exactly what a version mismatch has already produced twice in this driver.
 
-It is now a fixed GUID, as the comment always said it should be.
+So the driver now records what the compiler decided, before making the call
+that rejects it:
 
-## The rest of the start path reports too
+    built with: iddcx=1.2 umdf=2.33 caps=... diag=... init=...
+                monitorInfo=... clientConfig=...
 
-Whether the container ID was the whole cause is not something to assert, so
-every step after `EvtDeviceAdd` now records its outcome the same way:
-`IddCxAdapterInitAsync`, `EvtDevicePrepareHardware`, `EvtDeviceD0Entry`,
-`EvtAdapterInitFinished`, `IddCxMonitorCreate`, `IddCxMonitorArrival` and
-`EvtParseMonitorDescription`.
+Those numbers settle whether the version macros change these layouts at all,
+or only gate which functions get declared. If the sizes are a newer version's
+while the INF asks for IddCx 1.2, that is the answer and the fix follows from
+it directly. If they are 1.2's sizes, a whole class of cause is eliminated and
+the search moves elsewhere.
 
-If it fails again, the record will say which of those was reached and what it
-returned.
+## Why no fix in this release
 
-## You no longer need to remove the old version first
+Three fixes have been attempted on this failure. Two were wrong, and each cost
+a release and an install. The information this release collects costs the same
+one install and cannot be wrong.
 
-v0.1.8 was installed over v0.1.7 without removing it -- setup reported `device
-already exists; updating its driver` -- and the new binary was loaded anyway,
-proven by the behaviour changing. The DriverVer stamping added in v0.1.7 works.
+## Installing
 
-Installing straight over a previous version is fine from here on.
+Straight over the previous version; removing it first is no longer necessary.
+
+Extract the zip, double-click **Visual4k-Setup.exe**, choose **1**.
 
 ## Verified
 
 78 reference tests, 4 self-tests, a type-check of every host source and of the
 driver's diagnostics, a parse of every XML file, and a check that both declared
 framework versions match the INF.
-
-**Nobody has completed an install yet**, but the failure has moved twice now,
-each time to a later stage than the last.
