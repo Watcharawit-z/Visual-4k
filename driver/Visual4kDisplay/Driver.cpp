@@ -29,15 +29,25 @@ constexpr VirtualMode kPreferredMode = kModes[0];
 // field it feeds is a plain UINT32 bitfield.
 constexpr UINT32 kVideoSignalStandardOther = 255;
 
+// Container ID for the virtual monitor.
+//
+// This groups the monitor under one device in Settings, and reusing a fixed
+// value keeps the user's per-monitor arrangement stable across reboots rather
+// than scattering a new display every time. Windows treats it as a real
+// identity, so it has to be set: the code that this comment used to sit above
+// described exactly this and then never assigned the field, leaving it as a
+// null GUID.
+constexpr GUID kMonitorContainerId = {
+    0x9b2e5a41, 0x7c3d, 0x4f18,
+    {0xa5, 0x6b, 0x2d, 0x8e, 0x11, 0x4c, 0x9f, 0x03}};
+
 NTSTATUS CreateMonitor(DeviceContext* ctx)
 {
     IDDCX_MONITOR_INFO info = {};
     info.Size = sizeof(info);
     info.MonitorType = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL;
-    // Container ID groups the virtual monitor under one device in Settings.
-    // Reusing a fixed GUID keeps the user's per-monitor arrangement stable
-    // across reboots instead of scattering a new display every time.
     info.ConnectorIndex = 0;
+    info.MonitorContainerId = kMonitorContainerId;
 
     const std::vector<uint8_t> edid = BuildEdid(kPreferredMode.width,
                                               kPreferredMode.height,
@@ -56,6 +66,7 @@ NTSTATUS CreateMonitor(DeviceContext* ctx)
 
     IDARG_OUT_MONITORCREATE createOut = {};
     NTSTATUS status = IddCxMonitorCreate(ctx->adapter, &createIn, &createOut);
+    RecordStage(L"IddCxMonitorCreate", status);
     if (!NT_SUCCESS(status))
         return status;
 
@@ -63,7 +74,9 @@ NTSTATUS CreateMonitor(DeviceContext* ctx)
     GetContextWrapper(createOut.MonitorObject)->device = ctx;
 
     IDARG_OUT_MONITORARRIVAL arrivalOut = {};
-    return IddCxMonitorArrival(ctx->monitor, &arrivalOut);
+    status = IddCxMonitorArrival(ctx->monitor, &arrivalOut);
+    RecordStage(L"IddCxMonitorArrival", status);
+    return status;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,16 +86,20 @@ NTSTATUS CreateMonitor(DeviceContext* ctx)
 NTSTATUS EvtAdapterInitFinished(IDDCX_ADAPTER adapter,
                                 const IDARG_IN_ADAPTER_INIT_FINISHED* args)
 {
+    RecordStage(L"EvtAdapterInitFinished entered", args->AdapterInitStatus);
     if (!NT_SUCCESS(args->AdapterInitStatus))
         return args->AdapterInitStatus;
 
-    return CreateMonitor(GetContextWrapper(adapter)->device);
+    const NTSTATUS status = CreateMonitor(GetContextWrapper(adapter)->device);
+    RecordStage(L"EvtAdapterInitFinished complete", status);
+    return status;
 }
 
 NTSTATUS EvtParseMonitorDescription(
     const IDARG_IN_PARSEMONITORDESCRIPTION* in,
     IDARG_OUT_PARSEMONITORDESCRIPTION* out)
 {
+    RecordStage(L"EvtParseMonitorDescription", STATUS_SUCCESS);
     out->MonitorModeBufferOutputCount = ARRAYSIZE(kModes);
 
     // IddCx calls this once with a null buffer to ask for the count, then
@@ -201,6 +218,7 @@ NTSTATUS EvtDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE /*previous*/)
 {
     auto* ctx = GetDeviceContext(device);
     ctx->processor.reset();
+    RecordStage(L"EvtDeviceD0Entry", STATUS_SUCCESS);
     return STATUS_SUCCESS;
 }
 
@@ -230,11 +248,17 @@ NTSTATUS EvtDevicePrepareHardware(WDFDEVICE device,
 
     IDARG_OUT_ADAPTER_INIT initOut = {};
     NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);
+    RecordStage(L"IddCxAdapterInitAsync", status);
     if (!NT_SUCCESS(status))
         return status;
 
     ctx->adapter = initOut.AdapterObject;
     GetContextWrapper(initOut.AdapterObject)->device = ctx;
+
+    // Success here only means the adapter init was accepted; it finishes
+    // asynchronously in EvtAdapterInitFinished, which is where the monitor is
+    // created and where a later failure will be recorded from.
+    RecordStage(L"EvtDevicePrepareHardware complete", STATUS_SUCCESS);
     return STATUS_SUCCESS;
 }
 
