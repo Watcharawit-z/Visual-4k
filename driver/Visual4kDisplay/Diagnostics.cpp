@@ -1,10 +1,10 @@
 #include "Diagnostics.h"
 
-#include <cstdio>
+#include <cwchar>
 
 namespace visual4k {
 
-void RecordStage(const wchar_t* stage, NTSTATUS status)
+void RecordStage(const wchar_t* stage, StatusCode status)
 {
     wchar_t line[256];
     std::swprintf(line, 256, L"Visual4kDisplay: %ls -> 0x%08lX\n", stage,

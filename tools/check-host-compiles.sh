@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Syntax and type check for the Windows-only host sources, on any platform.
 #
-# Compiles host/visual4k-host/src against the hand-written stubs in
+# Compiles host/visual4k-host/src, and the driver diagnostics, against the
+# hand-written stubs in
 # tools/winstub/. Read tools/winstub/README.md for what this does and does not
 # prove -- in short, it catches errors in our code, never a misremembered API.
 set -uo pipefail
@@ -16,6 +17,7 @@ SOURCES=(
     host/visual4k-host/src/Renderer.cpp
     host/visual4k-host/src/Duplicator.cpp
     host/visual4k-host/src/main.cpp
+    driver/Visual4kDisplay/Diagnostics.cpp
 )
 
 status=0

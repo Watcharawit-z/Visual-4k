@@ -26,6 +26,12 @@
 
 namespace visual4k {
 
+// NTSTATUS spelled as the LONG it is, so this file needs none of the driver
+// framework headers. Diagnostics that fail to build for a reason connected to
+// what they are diagnosing are worth less than none, and the ordering those
+// headers require is delicate enough to have already broken this file once.
+using StatusCode = LONG;
+
 // Where the record goes. Setup creates this key with an ACL that lets the
 // driver host write to it, and reads it back after a failed start.
 inline constexpr wchar_t kDiagnosticsKey[] = L"SOFTWARE\\Visual-4k";
@@ -36,6 +42,6 @@ inline constexpr wchar_t kDiagnosticsKey[] = L"SOFTWARE\\Visual-4k";
 // Called on success too: a record saying the last step reached was
 // IddCxDeviceInitialize and it succeeded is what distinguishes "the driver
 // never ran" from "the driver ran and Windows still produced no display".
-void RecordStage(const wchar_t* stage, NTSTATUS status);
+void RecordStage(const wchar_t* stage, StatusCode status);
 
 }  // namespace visual4k

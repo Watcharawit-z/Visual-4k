@@ -137,6 +137,38 @@ DWORD WaitForSingleObject(HANDLE, DWORD);
 DWORD WaitForMultipleObjects(DWORD, const HANDLE*, BOOL, DWORD);
 }
 
+// Registry and debug output, enough for driver/Visual4kDisplay/Diagnostics.cpp.
+// That file is deliberately free of the driver framework headers so it can be
+// checked here, where a mistake costs seconds rather than a CI cycle.
+struct HKEY__ { int unused; }; using HKEY = HKEY__*;
+using PHKEY = HKEY*;
+using LPBYTE = BYTE*;
+using LSTATUS = LONG;
+using REGSAM = DWORD;
+struct SECURITY_ATTRIBUTES { DWORD nLength; LPVOID lpSecurityDescriptor; BOOL bInheritHandle; };
+
+#define HKEY_LOCAL_MACHINE ((HKEY)(UINT_PTR)0x80000002)
+#define ERROR_SUCCESS 0L
+#define REG_OPTION_NON_VOLATILE 0x00000000L
+#define KEY_SET_VALUE 0x0002
+#define KEY_QUERY_VALUE 0x0001
+#define REG_SZ 1
+#define REG_DWORD 4
+
+struct SYSTEMTIME {
+    WORD wYear, wMonth, wDayOfWeek, wDay, wHour, wMinute, wSecond, wMilliseconds;
+};
+
+extern "C" {
+LSTATUS RegCreateKeyExW(HKEY, LPCWSTR, DWORD, LPWSTR, DWORD, REGSAM,
+                        const SECURITY_ATTRIBUTES*, PHKEY, DWORD*);
+LSTATUS RegSetValueExW(HKEY, LPCWSTR, DWORD, DWORD, const BYTE*, DWORD);
+LSTATUS RegQueryValueExW(HKEY, LPCWSTR, DWORD*, DWORD*, LPBYTE, DWORD*);
+LSTATUS RegCloseKey(HKEY);
+void GetSystemTime(SYSTEMTIME*);
+void OutputDebugStringW(LPCWSTR);
+}
+
 // COM base, enough for ComPtr and the interfaces we touch.
 struct IUnknown {
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void**) = 0;
