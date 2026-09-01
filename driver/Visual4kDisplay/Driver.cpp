@@ -287,6 +287,22 @@ void EvtDeviceContextCleanup(WDFOBJECT object)
     GetDeviceContext(static_cast<WDFDEVICE>(object))->~DeviceContext();
 }
 
+// The driver exposes no control interface, so every request is refused.
+//
+// It exists because IddCxDeviceInitConfig validates that the mandatory
+// callbacks are set, and this one is mandatory. Leaving it null is the only
+// difference between this configuration and Microsoft's own sample, and it
+// matches the evidence exactly: at IddCx 1.2 the configuration was accepted
+// and the driver ran on to fail later, while every version from 1.3 to 1.10
+// refused it and the driver's code never ran at all. Which callbacks are
+// required is precisely the kind of thing that changes between versions.
+VOID EvtDeviceIoControl(WDFDEVICE /*device*/, WDFREQUEST request,
+                        size_t /*outputBufferLength*/,
+                        size_t /*inputBufferLength*/, ULONG /*ioControlCode*/)
+{
+    WdfRequestComplete(request, STATUS_NOT_SUPPORTED);
+}
+
 NTSTATUS EvtDeviceAdd(WDFDRIVER /*driver*/, PWDFDEVICE_INIT deviceInit)
 {
     WDF_PNPPOWER_EVENT_CALLBACKS power;
@@ -297,6 +313,7 @@ NTSTATUS EvtDeviceAdd(WDFDRIVER /*driver*/, PWDFDEVICE_INIT deviceInit)
 
     IDD_CX_CLIENT_CONFIG config;
     IDD_CX_CLIENT_CONFIG_INIT(&config);
+    config.EvtIddCxDeviceIoControl = EvtDeviceIoControl;
     config.EvtIddCxAdapterInitFinished = EvtAdapterInitFinished;
     config.EvtIddCxParseMonitorDescription = EvtParseMonitorDescription;
     config.EvtIddCxMonitorGetDefaultDescriptionModes = EvtMonitorGetDefaultModes;

@@ -479,6 +479,20 @@ bool StepInstallDriver(const Paths& paths)
         Line(L"    not this one (problem code " +
              std::to_wstring(status.problemCode) + L")", Tone::Dim);
 
+        // What the driver managed before it failed, per candidate. Without
+        // this the loop reports seven identical problem codes and hides the
+        // one thing that distinguishes them -- how far each got.
+        const DriverRecord record = ReadDriverRecord();
+        if (record.present) {
+            wchar_t code[32];
+            std::swprintf(code, 32, L"0x%08lX",
+                          static_cast<unsigned long>(record.status));
+            Line(L"    reached " + record.stage + L", " + std::wstring(code),
+                 Tone::Dim);
+        } else {
+            Line(L"    the driver's own code did not run", Tone::Dim);
+        }
+
         // Removed before the next attempt: leaving a stopped device behind
         // makes the following install an update of a broken node rather than a
         // clean try.
