@@ -1,72 +1,65 @@
-This fixes the failure that has blocked every release since the driver first
-installed, and it fixes a mistake I introduced in v0.1.6.
+This release stops guessing which version of the display class extension your
+Windows provides, and finds out on your machine instead.
 
-## What the numbers said
+## What v0.2.0 actually showed
 
-v0.1.10 collected the one fact that could not be guessed at:
+It failed with problem code 31 and this record:
 
-    last step  : IddCxAdapterInitAsync
-    status     : 0xC000000D
-    built with : iddcx=1.2 umdf=2.33 caps=88 diag=56 init=24
-                 monitorInfo=56 clientConfig=168
+    at        : 2026-09-01 08:31:08Z
+    built with: iddcx=1.2 ...
 
-`clientConfig=168` was **accepted** by `IddCxDeviceInitConfig`. So the IddCx 1.2
-class extension had loaded and was validating structure sizes correctly.
+Both lines are from the *previous* run. v0.2.0 was built for IddCx 1.9 and
+wrote nothing at all, which means `EvtDeviceAdd` was never entered: Windows
+could not load the 1.9 class extension.
 
-`caps=88` was refused. Its fields account for 64 of those bytes -- `Size`,
-`MaxMonitorsSupported`, and a 56-byte `EndPointDiagnostics`. The remaining 24
-belong to a later version of the structure: fields the driver never touches and
-the 1.2 extension never expected to receive.
+So both guesses were wrong in opposite directions. 1.2 loaded but was too old
+for the structures the header emits, and the adapter init was refused. 1.9 is
+too new for this machine to provide, and the driver's own code never ran.
 
-The two structures behave differently because the header treats them
-differently. Callback tables are gated on the version macros; plain data
-structures are not. Building for 1.2 shrinks `IDD_CX_CLIENT_CONFIG` correctly
-and leaves `IDDCX_ADAPTER_CAPS` at its newest layout, so the first sails
-through and the second is rejected as an invalid parameter -- with no
-indication of which parameter, which is why three attempts to infer it from
-outside got nowhere.
+A stale record complete with its own timestamp and build version looks exactly
+like a fresh answer, and it nearly sent the next fix in the wrong direction.
+Setup now clears the record before every attempt.
 
-## The mistake was mine, and the timeline shows it
+## What this release does instead
 
-v0.1.6 moved IddCx down to 1.2, on the reasoning that the oldest surface is the
-most widely available. The failure did not move at all: still problem code 31.
+The build compiles **one driver package per IddCx version the kit supports**,
+signs each with its own catalog, and ships them all -- seven of them in this
+archive.
 
-What actually fixed `CM_PROB_FAILED_ADD` was the UMDF version pin in v0.1.8.
-IddCx 1.2 was never load-bearing. It sat there for four releases contributing
-nothing but this.
+Setup installs them newest first and keeps the one whose device actually
+starts, removing each failure before trying the next so the following attempt
+is a clean create rather than an update of a broken node.
 
-## The fix
+Success is judged by the device starting, never by the install reporting
+success. Every failure in this sequence reported success at every install step.
 
-The driver is built for the IddCx version the kit ships, and CI writes that one
-discovery into **both** the compiler macros and the INF's `UmdfExtensions`.
+You will see it work through them:
 
-Having that version in two places caused the original mismatch. Pinning both by
-hand caused this one. There is now a single source, and the consistency check
-runs after stamping, against the files about to be shipped rather than what is
-committed.
+    7 driver packages available; trying newest first
 
-The cost is that the driver now needs a Windows with IddCx 1.9 rather than the
-1.2 every IddCx-capable Windows has. That compatibility was the entire argument
-for 1.2, and it bought nothing.
+      IddCx 1.9:
+        not this one (problem code 31)
+      IddCx 1.8:
+        ...
 
-## What this means for the install
-
-The failure has moved four times across this sequence, each time later than the
-last:
-
-    31, EvtDeviceAdd failed        UMDF version mismatch
-    10, EvtDeviceAdd complete      something after it
-    10, IddCxAdapterInitAsync      this call, invalid parameter
-    ->                             the parameter, named by its size
-
-This is the first release where there is a reasoned expectation of the device
-starting rather than a hope. If it does not, the driver's own record will name
-the next step precisely, as it has every time since v0.1.8.
+The machine has the answer; there is no reason for me to keep guessing at it
+from a build server.
 
 ## Installing
 
-Straight over the previous version. Extract, double-click **Visual4k-Setup.exe**,
-choose **1**.
+Straight over the previous version. Extract the zip, double-click
+**Visual4k-Setup.exe**, choose **1**.
+
+The install takes longer than before -- it may try several packages -- and the
+per-attempt failures scrolling past are expected, not errors.
+
+## Where this sequence has got to
+
+    31, EvtDeviceAdd failed        UMDF version mismatch, fixed
+    10, EvtDeviceAdd complete      something after it
+    10, IddCxAdapterInitAsync      invalid parameter, at IddCx 1.2
+    31, no record at all           IddCx 1.9 not present on the machine
+    ->                             every version, tried on the machine
 
 ## Also in here
 
@@ -77,6 +70,5 @@ an ordinary resolve averages away. RGB-stripe panels only, off by default.
 ## Verified
 
 78 reference tests, 4 self-tests, a type-check of every host source and of the
-driver's diagnostics, a parse of every XML file, and a check that both declared
-framework versions match the INF -- run after stamping, on the package being
-built.
+driver's diagnostics, a parse of every XML file, and a per-package check that
+each shipped driver carries its DLL, INF and signed catalog.
