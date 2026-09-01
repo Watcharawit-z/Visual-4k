@@ -1,6 +1,7 @@
 #include "Driver.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <cwchar>
 
@@ -266,9 +267,52 @@ NTSTATUS EvtDevicePrepareHardware(WDFDEVICE device,
                   sizeof(IDD_CX_CLIENT_CONFIG));
     RecordDetail(L"CompiledSizes", sizes);
 
+    // The size is offered rather than asserted.
+    //
+    // IddCxAdapterInitAsync refused this structure with
+    // STATUS_INVALID_PARAMETER, naming no parameter, while every field in it
+    // matches Microsoft's sample exactly. The one thing a sample cannot
+    // disagree about is the layout the header happens to emit: the class
+    // extension validates Size against the version it is operating as, and the
+    // header versions its callback tables but not necessarily its data
+    // structures. So a driver built for 1.2 can hand over a structure sized
+    // for something newer and be refused for it.
+    //
+    // Rather than guess which layout this machine's extension expects -- and
+    // guessing is what cost the last several attempts -- offer each plausible
+    // one and let it choose. The full compiled size first, since that is right
+    // whenever the header did version the structure, then the size implied by
+    // the fields this driver actually sets. Every attempt is recorded, so a
+    // total failure still says what was tried.
+    const size_t fullDiagnostics = sizeof(IDDCX_ENDPOINT_DIAGNOSTIC_INFO);
+    const size_t usedCaps =
+        offsetof(IDDCX_ADAPTER_CAPS, EndPointDiagnostics) + fullDiagnostics;
+
+    struct Layout { size_t caps; size_t diagnostics; };
+    const Layout layouts[] = {
+        {sizeof(IDDCX_ADAPTER_CAPS), fullDiagnostics},
+        {usedCaps,                   fullDiagnostics},
+    };
+
+    NTSTATUS status = STATUS_INVALID_PARAMETER;
     IDARG_OUT_ADAPTER_INIT initOut = {};
-    NTSTATUS status = IddCxAdapterInitAsync(&init, &initOut);
-    RecordStage(L"IddCxAdapterInitAsync", status);
+
+    for (const Layout& layout : layouts) {
+        caps.Size = static_cast<UINT>(layout.caps);
+        caps.EndPointDiagnostics.Size = static_cast<UINT>(layout.diagnostics);
+
+        initOut = {};
+        status = IddCxAdapterInitAsync(&init, &initOut);
+
+        wchar_t attempt[128];
+        std::swprintf(attempt, 128, L"IddCxAdapterInitAsync caps=%zu diag=%zu",
+                      layout.caps, layout.diagnostics);
+        RecordStage(attempt, status);
+
+        if (NT_SUCCESS(status))
+            break;
+    }
+
     if (!NT_SUCCESS(status))
         return status;
 

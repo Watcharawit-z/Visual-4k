@@ -428,6 +428,44 @@ jobs:
                         -ErrorAction SilentlyContinue
           }
 
+          # And 1.2, which the kit ships no import library for and which is
+          # nonetheless the only version that has ever loaded on the machine
+          # this is being debugged against.
+          #
+          # Every package built above declares its own version in the INF and
+          # links that version's stub, and all seven failed to load at all --
+          # the driver's code never ran. The releases that did run were built
+          # exactly this way: 1.2 macros, 1.2 in the INF, and whatever stub the
+          # kit happened to provide. The sweep left that combination out, which
+          # is why it swept past the one answer it was looking for.
+          $newestLib = $versionDirs[-1].Group | Select-Object -First 1
+          Write-Host "=== building for IddCx 1.2 (stub from $($newestLib.Directory.Name)) ==="
+
+          python tools\stamp-driverver.py --iddcx "1.2"
+          if ($LASTEXITCODE -ne 0) { throw "stamping the INF for 1.2 failed" }
+
+          msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
+                  /p:Configuration=Release /p:Platform=x64 `
+                  "/p:Visual4kIddCxInclude=$iddcxInclude" `
+                  "/p:Visual4kIddCxLib=$($newestLib.DirectoryName)" `
+                  "/p:Visual4kIddCxLibFile=$($newestLib.FullName)" `
+                  /p:Visual4kIddCxMajor=1 `
+                  /p:Visual4kIddCxMinor=2 `
+                  /v:minimal /p:SignMode=Off
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::IddCx 1.2 did not build; skipping it"
+          } else {
+            $dll = Get-ChildItem driver/Visual4kDisplay/x64 -Recurse `
+                       -Filter Visual4kDisplay.dll -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+            if (-not $dll) { throw "IddCx 1.2 built with no DLL" }
+            $target = Join-Path $staging "iddcx-1.2"
+            New-Item -ItemType Directory -Force -Path $target | Out-Null
+            Copy-Item $dll.FullName $target
+            Copy-Item driver/Visual4kDisplay/Visual4kDisplay.inf $target
+            Write-Host "staged: $target"
+          }
+
           $built = Get-ChildItem $staging -Directory
           if (-not $built) { throw "no IddCx version produced a package" }
           Write-Host "packages built: $($built.Name -join ', ')"
