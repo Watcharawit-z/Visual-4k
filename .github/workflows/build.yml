@@ -268,12 +268,6 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
-          # Every build gets its own DriverVer. Without it Windows can keep
-          # serving the package already in the store, so an install over a
-          # previous version updates nothing and the old binary stays bound.
-          python tools\stamp-driverver.py
-          if ($LASTEXITCODE -ne 0) { throw "stamping DriverVer failed" }
-
           msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
                   /p:Configuration=Release /p:Platform=x64 `
                   /getProperty:PlatformToolset `
@@ -330,23 +324,31 @@ jobs:
                       Where-Object { $_.FullName -match '\\x64\\' } |
                       Sort-Object FullName -Descending | Select-Object -First 1
 
-          # The IddCx version is NOT read off the kit any more, and that is the
-          # whole point of this comment.
+          # The IddCx version comes from the kit, and is written into BOTH the
+          # compiler macros and the INF, from this one discovery.
           #
-          # It used to be, and the driver was therefore compiled against
-          # whatever the runner had installed -- 1.9 -- while the INF asked
-          # Windows to load IddCx0102, version 1.2. The version macros decide
-          # the size and shape of IDD_CX_CLIENT_CONFIG, so the driver handed
-          # the 1.2 class extension a structure it did not recognise,
-          # IddCxDeviceInitConfig refused it, EvtDeviceAdd returned the
-          # failure, and the device came up with CM_PROB_FAILED_ADD: driver
-          # loaded, device created, nothing worked. Nothing in the build could
-          # see it, because both halves were individually correct.
+          # Having it in two places was the whole problem. It was hand-written
+          # in the INF and discovered here, they disagreed, and the failure was
+          # invisible to the build because each half was individually correct.
+          # Pinning both by hand fixed that and introduced the opposite fault:
+          # the header gates callback tables on the version macros but not data
+          # structures, so building for an older extension produces a
+          # correctly-shrunk IDD_CX_CLIENT_CONFIG next to a full-size
+          # IDDCX_ADAPTER_CAPS, and the class extension refuses the second.
           #
-          # The version now comes from the project file, matching the INF, and
-          # tools/check-iddcx-version.py fails the build if they ever diverge
-          # again. The kit's headers gate their declarations on these macros
-          # precisely so a newer kit can build for an older extension.
+          # One source, stamped into both.
+          $iddcxVersionDir = Get-ChildItem "$kit\Include\*\um\iddcx" -Directory `
+                                 -ErrorAction SilentlyContinue |
+                             Where-Object { $_.Name -match '^(\d+)\.(\d+)$' } |
+                             Sort-Object {
+                                 $p = $_.Name -split '\.'
+                                 [int]$p[0] * 1000 + [int]$p[1]
+                             } -Descending | Select-Object -First 1
+          if (-not $iddcxVersionDir) { throw "no versioned IddCx directory under $kit" }
+          $parts = $iddcxVersionDir.Name -split '\.'
+          $iddcxMajor = $parts[0]
+          $iddcxMinor = $parts[1]
+          Write-Host "IddCx version: $iddcxMajor.$iddcxMinor ($($iddcxVersionDir.FullName))"
 
           if ($iddcxHeader) {
             Write-Host "iddcx.h: $($iddcxHeader.FullName)"
@@ -365,11 +367,24 @@ jobs:
             throw "no x64 IddCx import library under $kit (see the listing above)"
           }
 
+          # Every build gets its own DriverVer. Without it Windows can keep
+          # serving the package already in the store, so an install over a
+          # previous version updates nothing and the old binary stays bound.
+          python tools\stamp-driverver.py --iddcx "$iddcxMajor.$iddcxMinor"
+          if ($LASTEXITCODE -ne 0) { throw "stamping the INF failed" }
+
+          # Checked after stamping, on the files that are about to be built and
+          # shipped, rather than on what is committed.
+          python tools\check-driver-versions.py
+          if ($LASTEXITCODE -ne 0) { throw "the driver's declared versions disagree" }
+
           msbuild driver\Visual4kDisplay\Visual4kDisplay.vcxproj `
                   /p:Configuration=Release /p:Platform=x64 `
                   "/p:Visual4kIddCxInclude=$iddcxInclude" `
                   "/p:Visual4kIddCxLib=$iddcxLibDir" `
                   "/p:Visual4kIddCxLibFile=$iddcxLibFile" `
+                  /p:Visual4kIddCxMajor=$iddcxMajor `
+                  /p:Visual4kIddCxMinor=$iddcxMinor `
                   /v:normal /p:SignMode=Off
           if ($LASTEXITCODE -ne 0) { throw "driver build failed" }
 

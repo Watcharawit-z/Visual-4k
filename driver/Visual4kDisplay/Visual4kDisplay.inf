@@ -76,14 +76,22 @@ UmdfFsContextUsePolicy     = CannotUseFsContexts
 ; both the same makes them a single section, and the UMDF loader then reads
 ; install directives as service settings.
 ;
-; UmdfExtensions names the IddCx version this driver is written against.
-; IddCx0102 is the baseline every IddCx-capable Windows provides, and the
-; driver only uses calls present in it, so asking for a newer surface would
-; narrow compatibility for nothing.
+; UmdfExtensions names the IddCx version this driver is written against, and
+; is stamped by the build (tools/stamp-driverver.py) from the version of the
+; kit it compiled against. It must not be edited by hand.
+;
+; It said IddCx0102 for a while, on the reasoning that the oldest surface is
+; the most widely available. That was wrong in a way worth recording. The
+; header gates its callback tables on the version macros but leaves its data
+; structures at their newest layout, so a driver built for 1.2 hands the class
+; extension a correctly-shrunk IDD_CX_CLIENT_CONFIG and a full-size
+; IDDCX_ADAPTER_CAPS. The first is accepted, the second is refused with
+; STATUS_INVALID_PARAMETER, and the device fails to start with problem code 10
+; while every install step reports success.
 [Visual4kDisplay_Service]
 UmdfLibraryVersion = 2.33.0
 ServiceBinary      = %13%\Visual4kDisplay.dll
-UmdfExtensions     = IddCx0102
+UmdfExtensions     = IddCx0109
 
 [UMDriverCopy]
 Visual4kDisplay.dll

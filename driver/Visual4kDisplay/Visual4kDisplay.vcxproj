@@ -84,23 +84,21 @@
          compile without the version macros: IddCxFuncEnum.h stops with
          "IDDCX_VERSION_MAJOR is not defined" rather than picking a default.
 
-         These are pinned, and must stay equal to the UmdfExtensions value in
-         Visual4kDisplay.inf, which asks Windows to load IddCx0102.
+         These must stay equal to the UmdfExtensions value in
+         Visual4kDisplay.inf, and CI passes both from the version of the kit it
+         is building against so that neither can be edited into disagreement.
 
-         They were previously read off whatever version the build machine's
-         kit had installed, which produced a driver compiled for IddCx 1.9 and
-         an INF asking for 1.2. The macros decide the size and layout of
-         IDD_CX_CLIENT_CONFIG, so IddCxDeviceInitConfig was handed a structure
-         the loaded extension did not recognise and refused it. The device
-         installed, bound its driver, and failed to start with
-         CM_PROB_FAILED_ADD. Both halves were individually correct, so nothing
-         in the build could see it.
-
-         Building for the older version against newer headers is exactly what
-         the version macros are for; it is also what keeps this driver usable
-         on Windows releases that do not ship the newest extension. -->
+         The default here is the version the WDK ships, not the oldest
+         available. Building for an older extension seemed like the safer
+         choice for compatibility and is not: the header gates its callback
+         tables on these macros but leaves its data structures at their newest
+         layout, so a driver built for 1.2 passes a correctly-shrunk
+         IDD_CX_CLIENT_CONFIG and a full-size IDDCX_ADAPTER_CAPS. The class
+         extension accepts the first and refuses the second with
+         STATUS_INVALID_PARAMETER, and the device fails to start with problem
+         code 10 after an install that reports success at every step. -->
     <Visual4kIddCxMajor Condition="'$(Visual4kIddCxMajor)' == ''">1</Visual4kIddCxMajor>
-    <Visual4kIddCxMinor Condition="'$(Visual4kIddCxMinor)' == ''">2</Visual4kIddCxMinor>
+    <Visual4kIddCxMinor Condition="'$(Visual4kIddCxMinor)' == ''">9</Visual4kIddCxMinor>
 
     <!-- The full path of the IddCx import library, not just its directory.
          Adding the directory and naming IddCx.lib still failed to link, so
